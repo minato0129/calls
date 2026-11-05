@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -55,6 +54,16 @@ func (h *Hub) publish(roomID string) {
 	}
 }
 
+// 接続直後に送る 2KB の空コメント(":" + 空白 2048 個 + 空行)
+var ssePadding = func() []byte {
+	b := make([]byte, 0, 2051)
+	b = append(b, ':')
+	for i := 0; i < 2048; i++ {
+		b = append(b, ' ')
+	}
+	return append(b, '\n', '\n')
+}()
+
 // GET /api/rooms/:id/events
 func (app *App) handleEvents(c echo.Context) error {
 	room, err := app.memberRoom(c)
@@ -72,7 +81,7 @@ func (app *App) handleEvents(c echo.Context) error {
 	defer app.hub.unsubscribe(room.ID, ch)
 
 	// 一部のプロキシは最初に一定量が溜まるまで送らないので、2KB のコメントで押し出す
-	_, _ = w.Write([]byte(":" + strings.Repeat(" ", 2048) + "\n\n"))
+	_, _ = w.Write(ssePadding)
 	_, _ = w.Write([]byte("retry: 3000\nevent: queue\ndata: {}\n\n"))
 	w.Flush()
 	// クライアントが「接続が生きている」と分かるよう、コメントではなくイベントとして送る
