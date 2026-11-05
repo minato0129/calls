@@ -11,7 +11,7 @@ import (
 
 type Period struct {
 	No    int    `json:"no"`
-	Start string `json:"start"` // "09:10"
+	Start string `json:"start"` // "09:15"
 	End   string `json:"end"`   // "10:40"
 }
 
@@ -74,7 +74,7 @@ func loadConfig() (*Config, error) {
 	}
 	c.DSN += "parseTime=true&loc=UTC&time_zone=%27%2B00%3A00%27&charset=utf8mb4"
 
-	periods, err := parsePeriods(env("PERIODS", "1=09:10-10:40,2=10:50-12:20,3=13:10-14:40,4=14:50-16:20,5=16:30-18:00"))
+	periods, err := parsePeriods(env("PERIODS", "1=09:15-10:45,2=11:00-12:30,3=13:30-15:00,4=15:15-16:45,5=17:00-18:30,6=18:45-20:15"))
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func loadConfig() (*Config, error) {
 	return c, nil
 }
 
-// "1=09:10-10:40,2=10:50-12:20"
+// "1=09:15-10:45,2=11:00-12:30"
 func parsePeriods(s string) ([]Period, error) {
 	var ps []Period
 	for _, item := range strings.Split(s, ",") {

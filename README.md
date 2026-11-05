@@ -89,7 +89,7 @@ iPhone の注意点:
 | `VAPID_SUBJECT` | `admin@example.com` | 通知サービスに伝える連絡先。自分か学校のメールアドレスに変更(`mailto:` は付けても付けなくてもよい) |
 | `FORCE_OPEN` | `false` | `true` なら時間割を無視して全ルームを授業中扱い(開発用) |
 | `RENOTIFY_SECONDS` | `180` | 先生への再通知間隔 |
-| `PERIODS` | `1=09:10-10:40,…,5=16:30-18:00` | 時限の時間割(JST)。compose の server.environment に追加して使う |
+| `PERIODS` | `1=09:15-10:45,…,6=18:45-20:15` | 時限の時間割(JST)。形式は `時限=開始-終了` をカンマ区切り |
 | `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | `root` / `callsys` | DB のパスワード |
 
 ## Microsoft ログインの設定(AUTH_MODE=microsoft)
