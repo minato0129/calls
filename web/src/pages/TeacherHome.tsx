@@ -19,7 +19,7 @@ export default function TeacherHome() {
       <Header title="ルーム" right={<LogoutButton />} />
       <main className="page stack">
         <p className="muted">{user?.name} 先生</p>
-        <PushCard text="学生から呼び出されたときに通知を受け取れるようにします" />
+        <PushCard text="学生から呼び出されたときに通知を受け取れるようにします" showTest />
 
         <section className="stack">
           {rooms.length === 0 && <p className="muted">まだルームがありません。下のフォームから作成してください。</p>}

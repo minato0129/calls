@@ -69,9 +69,21 @@ export async function enablePush(vapidPublicKey: string): Promise<'ok' | 'denied
 }
 
 // 既に許可済みなら、ログイン後に購読をサーバーへ登録し直す(別ユーザーで使った端末対策)
-export async function resyncPush(vapidPublicKey: string) {
-  if (!pushSupported() || Notification.permission !== 'granted' || !vapidPublicKey) return
-  await enablePush(vapidPublicKey).catch(() => undefined)
+// 画面ごとに呼ばれるので、アプリを開いている間は1回だけにする
+let resynced: Promise<void> | null = null
+export function resyncPush(vapidPublicKey: string) {
+  if (!pushSupported() || Notification.permission !== 'granted' || !vapidPublicKey) return Promise.resolve()
+  resynced ??= enablePush(vapidPublicKey).then(() => undefined, () => { resynced = null })
+  return resynced
+}
+
+export interface PushTestResult { sent: number; failed: number; removed: number; errors: string[] }
+
+export async function sendTestPush(): Promise<PushTestResult> {
+  const res = await fetch('/api/push/test', { method: 'POST', credentials: 'same-origin' })
+  const body = await res.json()
+  if (!res.ok) throw new Error(body.error ?? `エラー (${res.status})`)
+  return body
 }
 
 // アプリを前面で開いているときの通知(Service Worker から postMessage で届く)
