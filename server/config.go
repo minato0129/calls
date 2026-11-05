@@ -111,43 +111,54 @@ func hm(s string) int {
 	return hi*60 + mi
 }
 
-// 現在の曜日と時限(JST)。授業時間外なら ok=false
-func (c *Config) currentSlot(t time.Time) (dow, period int, ok bool) {
-	lt := t.In(c.Loc)
-	min := lt.Hour()*60 + lt.Minute()
+func (c *Config) period(no int) (Period, bool) {
 	for _, p := range c.Periods {
-		if min >= hm(p.Start) && min < hm(p.End) {
-			return int(lt.Weekday()), p.No, true
+		if p.No == no {
+			return p, true
 		}
 	}
-	return int(lt.Weekday()), 0, false
+	return Period{}, false
 }
 
-// 時間割どおりなら授業中か
-func (c *Config) scheduledOpen(dow, period int, now time.Time) bool {
+// 開始時限〜終了時限の、その日の開始・終了時刻(JST の分)。間の休み時間も含む
+func (c *Config) slotMinutes(first, last int) (start, end int, ok bool) {
+	pf, ok1 := c.period(first)
+	pl, ok2 := c.period(last)
+	if !ok1 || !ok2 {
+		return 0, 0, false
+	}
+	return hm(pf.Start), hm(pl.End), true
+}
+
+// 時間割どおりなら授業中か(複数コマのときは、間の休み時間も授業中とみなす)
+func (c *Config) scheduledOpen(dow, first, last int, now time.Time) bool {
 	if c.ForceOpen {
 		return true
 	}
-	d, p, ok := c.currentSlot(now)
-	return ok && d == dow && p == period
+	start, end, ok := c.slotMinutes(first, last)
+	if !ok {
+		return false
+	}
+	lt := now.In(c.Loc)
+	min := lt.Hour()*60 + lt.Minute()
+	return int(lt.Weekday()) == dow && min >= start && min < end
 }
 
-// 今が時間割上の授業中なら、その時限の終了時刻を返す
-func (c *Config) scheduledEnd(dow, period int, now time.Time) (time.Time, bool) {
-	if !c.scheduledOpen(dow, period, now) {
+// 今が時間割上の授業中なら、最後の時限の終了時刻を返す
+func (c *Config) scheduledEnd(dow, first, last int, now time.Time) (time.Time, bool) {
+	if !c.scheduledOpen(dow, first, last, now) {
 		return time.Time{}, false
 	}
-	for _, p := range c.Periods {
-		if p.No == period {
-			lt := now.In(c.Loc)
-			m := hm(p.End)
-			end := time.Date(lt.Year(), lt.Month(), lt.Day(), m/60, m%60, 0, 0, c.Loc)
-			if end.After(now) {
-				return end.UTC(), true
-			}
-		}
+	_, endMin, ok := c.slotMinutes(first, last)
+	if !ok {
+		return time.Time{}, false
 	}
-	return time.Time{}, false
+	lt := now.In(c.Loc)
+	end := time.Date(lt.Year(), lt.Month(), lt.Day(), endMin/60, endMin%60, 0, 0, c.Loc)
+	if !end.After(now) {
+		return time.Time{}, false
+	}
+	return end.UTC(), true
 }
 
 // ルームが今開いているか。先生の手動操作(開始・終了)が時間割より優先される
@@ -158,5 +169,5 @@ func (c *Config) roomOpen(r *Room, now time.Time) bool {
 	if r.OpenUntil != nil && now.Before(*r.OpenUntil) {
 		return true
 	}
-	return c.scheduledOpen(r.DayOfWeek, r.Period, now)
+	return c.scheduledOpen(r.DayOfWeek, r.Period, r.LastPeriod(), now)
 }

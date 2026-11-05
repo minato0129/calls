@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ func (app *App) routes(e *echo.Echo) {
 	// 先生
 	api.GET("/rooms", app.handleListRooms, login, teacher)
 	api.POST("/rooms", app.handleCreateRoom, login, teacher)
+	api.PATCH("/rooms/:id", app.handleUpdateRoom, login, teacher)
 	api.DELETE("/rooms/:id", app.handleDeleteRoom, login, teacher)
 	api.POST("/rooms/:id/calls/:callId/done", app.handleFinishCall, login, teacher)
 	api.POST("/rooms/:id/ack", app.handleAck, login, teacher)
@@ -78,6 +80,7 @@ func errorHandler(err error, c echo.Context) {
 // ---------- helpers ----------
 
 func (app *App) withOpen(r *Room) *Room {
+	r.PeriodEnd = r.LastPeriod() // 古いルーム(0)も、レスポンスでは終了時限を入れて返す
 	r.IsOpen = app.cfg.roomOpen(r, time.Now())
 	return r
 }
@@ -146,32 +149,84 @@ func (app *App) handleListRooms(c echo.Context) error {
 	return c.JSON(http.StatusOK, rooms)
 }
 
-func (app *App) handleCreateRoom(c echo.Context) error {
-	var in struct {
-		Subject   string `json:"subject"`
-		ClassName string `json:"className"`
-		DayOfWeek int    `json:"dayOfWeek"`
-		Period    int    `json:"period"`
-	}
+type roomInput struct {
+	Subject   string `json:"subject"`
+	ClassName string `json:"className"`
+	DayOfWeek int    `json:"dayOfWeek"`
+	Period    int    `json:"period"`    // 開始時限
+	PeriodEnd int    `json:"periodEnd"` // 終了時限。省略(0)なら開始時限と同じ
+}
+
+// 入力を検証して Room の項目に反映する
+func (app *App) applyRoomInput(c echo.Context, r *Room) error {
+	var in roomInput
 	if err := c.Bind(&in); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "入力が不正です")
 	}
 	in.Subject, in.ClassName = strings.TrimSpace(in.Subject), strings.TrimSpace(in.ClassName)
-	validPeriod := false
-	for _, p := range app.cfg.Periods {
-		validPeriod = validPeriod || p.No == in.Period
+	if in.PeriodEnd == 0 {
+		in.PeriodEnd = in.Period
 	}
-	if in.Subject == "" || in.ClassName == "" || in.DayOfWeek < 0 || in.DayOfWeek > 6 || !validPeriod {
+	_, okStart := app.cfg.period(in.Period)
+	_, okEnd := app.cfg.period(in.PeriodEnd)
+	if in.Subject == "" || in.ClassName == "" || in.DayOfWeek < 0 || in.DayOfWeek > 6 || !okStart || !okEnd {
 		return echo.NewHTTPError(http.StatusBadRequest, "科目名・クラス名・曜日・時限を正しく入力してください")
 	}
+	if in.PeriodEnd < in.Period {
+		return echo.NewHTTPError(http.StatusBadRequest, "終了の時限は開始の時限以降にしてください")
+	}
+	r.Subject, r.ClassName, r.DayOfWeek, r.Period, r.PeriodEnd = in.Subject, in.ClassName, in.DayOfWeek, in.Period, in.PeriodEnd
+	return nil
+}
+
+func slotTakenError(err error) error {
+	var st *SlotTakenError
+	if errors.As(err, &st) {
+		o := st.Room
+		return echo.NewHTTPError(http.StatusConflict,
+			fmt.Sprintf("時間が重なるルームがあります(%s: %s)", slotLabel(o.DayOfWeek, o.Period, o.LastPeriod()), o.Subject))
+	}
+	return echo.NewHTTPError(http.StatusConflict, "時間が重なるルームがあります")
+}
+
+func slotLabel(dow, first, last int) string {
+	days := []string{"日", "月", "火", "水", "木", "金", "土"}
+	if first == last {
+		return fmt.Sprintf("%s曜 %d限", days[dow], first)
+	}
+	return fmt.Sprintf("%s曜 %d〜%d限", days[dow], first, last)
+}
+
+func (app *App) handleCreateRoom(c echo.Context) error {
 	u := currentUser(c)
-	room := &Room{OwnerID: u.ID, OwnerName: u.Name, Subject: in.Subject, ClassName: in.ClassName, DayOfWeek: in.DayOfWeek, Period: in.Period}
+	room := &Room{OwnerID: u.ID, OwnerName: u.Name}
+	if err := app.applyRoomInput(c, room); err != nil {
+		return err
+	}
 	if err := app.store.CreateRoom(c.Request().Context(), room); errors.Is(err, ErrSlotTaken) {
-		return echo.NewHTTPError(http.StatusConflict, "同じ曜日・時限のルームがすでにあります")
+		return slotTakenError(err)
 	} else if err != nil {
 		return err
 	}
 	return c.JSON(http.StatusCreated, app.withOpen(room))
+}
+
+// PATCH /api/rooms/:id 科目名・クラス名・曜日・時限の変更。メモ・受講登録・QR はそのまま
+func (app *App) handleUpdateRoom(c echo.Context) error {
+	room, err := app.ownerRoom(c)
+	if err != nil {
+		return err
+	}
+	if err := app.applyRoomInput(c, room); err != nil {
+		return err
+	}
+	if err := app.store.UpdateRoom(c.Request().Context(), room); errors.Is(err, ErrSlotTaken) {
+		return slotTakenError(err)
+	} else if err != nil {
+		return err
+	}
+	app.hub.publish(room.ID) // 開いている画面に開閉の変化を伝える
+	return c.JSON(http.StatusOK, app.withOpen(room))
 }
 
 func (app *App) handleDeleteRoom(c echo.Context) error {
@@ -235,7 +290,7 @@ func (app *App) handleCloseRoom(c echo.Context) error {
 	}
 	ctx := c.Request().Context()
 	var closedUntil *time.Time
-	if end, ok := app.cfg.scheduledEnd(room.DayOfWeek, room.Period, time.Now()); ok {
+	if end, ok := app.cfg.scheduledEnd(room.DayOfWeek, room.Period, room.LastPeriod(), time.Now()); ok {
 		closedUntil = &end
 	}
 	if err := app.store.SetManualState(ctx, room.ID, nil, closedUntil); err != nil {

@@ -4,6 +4,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { api, CALL_LABEL, slotLabel, type Call, type Room, type TeacherQueue } from '../api'
 import { useNow, useRoomEvents } from '../app-context'
 import { elapsed, ErrorText, Header, PushCard } from '../components'
+import { RoomForm } from '../RoomForm'
 import { chime, onForegroundPush } from '../push'
 
 export default function TeacherRoom() {
@@ -16,6 +17,7 @@ export default function TeacherRoom() {
   const [selected, setSelected] = useState<Call | null>(null)
   const [memo, setMemo] = useState('')
   const [showQR, setShowQR] = useState(false)
+  const [editing, setEditing] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -53,7 +55,10 @@ export default function TeacherRoom() {
         {room && (
           <section className="card session">
             <div>
-              <p className="muted small">{room.className} ・ {slotLabel(room)}</p>
+              <p className="muted small">
+                {room.className} ・ {slotLabel(room)}{' '}
+                <button className="link-btn inline" onClick={() => setEditing(true)}>変更</button>
+              </p>
               <p>
                 {queue?.isOpen ? <span className="badge live">授業中</span> : <span className="badge">授業時間外</span>}
                 {queue?.isOpen && room.openUntil && new Date(room.openUntil) > new Date(now) && (
@@ -138,6 +143,25 @@ export default function TeacherRoom() {
           ルームを削除
         </button>
       </main>
+
+      {editing && room && (
+        <div className="dialog-backdrop" onClick={() => setEditing(false)}>
+          <div className="dialog stack" role="dialog" aria-modal onClick={(e) => e.stopPropagation()}>
+            <h2>ルームを変更</h2>
+            <p className="hint">メモ・参加している学生・QRコードはそのまま引き継がれます。</p>
+            <RoomForm
+              initial={{ subject: room.subject, className: room.className, dayOfWeek: room.dayOfWeek, period: room.period, periodEnd: room.periodEnd }}
+              submitLabel="保存"
+              onCancel={() => setEditing(false)}
+              onSubmit={async (v) => {
+                setRoom(await api.updateRoom(id, v))
+                setEditing(false)
+                await load()
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {selected && (
         <div className="dialog-backdrop" onClick={() => setSelected(null)}>

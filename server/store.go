@@ -94,13 +94,62 @@ func fillOwner(rooms []Room) []*Room {
 	return out
 }
 
+// 同じ先生・同じ曜日で、時限の範囲が重なるルームを探す(exceptID は自分自身を除くため)
+func overlappingRoom(tx *gorm.DB, r *Room, exceptID string) (*Room, error) {
+	var rooms []Room
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("owner_id = ? AND day_of_week = ? AND id <> ?", r.OwnerID, r.DayOfWeek, exceptID).
+		Find(&rooms).Error; err != nil {
+		return nil, err
+	}
+	for i := range rooms {
+		o := &rooms[i]
+		if r.Period <= o.LastPeriod() && o.Period <= r.LastPeriod() {
+			return o, nil
+		}
+	}
+	return nil, nil
+}
+
+// 時限が重なるルームがあるときのエラー
+type SlotTakenError struct{ Room *Room }
+
+func (e *SlotTakenError) Error() string        { return "slot taken" }
+func (e *SlotTakenError) Is(target error) bool { return target == ErrSlotTaken }
+
 func (s *Store) CreateRoom(ctx context.Context, r *Room) error {
 	r.ID = newID()
-	err := s.db.WithContext(ctx).Omit("Owner").Create(r).Error
-	if errors.Is(err, gorm.ErrDuplicatedKey) {
-		return ErrSlotTaken
-	}
-	return err
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if o, err := overlappingRoom(tx, r, ""); err != nil {
+			return err
+		} else if o != nil {
+			return &SlotTakenError{Room: o}
+		}
+		err := tx.Omit("Owner").Create(r).Error
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return ErrSlotTaken
+		}
+		return err
+	})
+}
+
+// 科目名・クラス名・曜日・時限を変更する(メモや受講登録はそのまま)
+func (s *Store) UpdateRoom(ctx context.Context, r *Room) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if o, err := overlappingRoom(tx, r, r.ID); err != nil {
+			return err
+		} else if o != nil {
+			return &SlotTakenError{Room: o}
+		}
+		err := tx.Model(&Room{}).Where("id = ?", r.ID).Updates(map[string]any{
+			"subject": r.Subject, "class_name": r.ClassName,
+			"day_of_week": r.DayOfWeek, "period": r.Period, "period_end": r.PeriodEnd,
+		}).Error
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return ErrSlotTaken
+		}
+		return err
+	})
 }
 
 func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
