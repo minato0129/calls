@@ -12,7 +12,8 @@ export interface Room {
   subject: string
   className: string
   dayOfWeek: number
-  period: number
+  period: number    // 開始時限
+  periodEnd: number // 終了時限(1コマなら period と同じ)
   createdAt: string
   isOpen: boolean
   openUntil: string | null
@@ -63,8 +64,8 @@ export const api = {
 
   // 先生
   rooms: () => request<Room[]>('GET', '/api/rooms'),
-  createRoom: (r: { subject: string; className: string; dayOfWeek: number; period: number }) =>
-    request<Room>('POST', '/api/rooms', r),
+  createRoom: (r: RoomInput) => request<Room>('POST', '/api/rooms', r),
+  updateRoom: (id: string, r: RoomInput) => request<Room>('PATCH', `/api/rooms/${id}`, r),
   deleteRoom: (id: string) => request<void>('DELETE', `/api/rooms/${id}`),
   finishCall: (roomId: string, callId: number, memo: string) =>
     request<void>('POST', `/api/rooms/${roomId}/calls/${callId}/done`, { memo }),
@@ -92,6 +93,9 @@ export const api = {
 export const DAYS = ['日', '月', '火', '水', '木', '金', '土']
 export const CALL_LABEL: Record<CallType, string> = { QUESTION: '質問', CHECK: '課題チェック' }
 
-export function slotLabel(r: Pick<Room, 'dayOfWeek' | 'period'>) {
-  return `${DAYS[r.dayOfWeek]}曜 ${r.period}限`
+export interface RoomInput { subject: string; className: string; dayOfWeek: number; period: number; periodEnd: number }
+
+export function slotLabel(r: Pick<Room, 'dayOfWeek' | 'period'> & { periodEnd?: number }) {
+  const end = r.periodEnd && r.periodEnd > r.period ? r.periodEnd : r.period
+  return end === r.period ? `${DAYS[r.dayOfWeek]}曜 ${r.period}限` : `${DAYS[r.dayOfWeek]}曜 ${r.period}〜${end}限`
 }

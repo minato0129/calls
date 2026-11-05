@@ -14,13 +14,15 @@ type User struct {
 }
 
 type Room struct {
-	ID        string    `gorm:"primaryKey;size:32" json:"id"`
-	OwnerID   string    `gorm:"size:64;not null;uniqueIndex:uq_owner_slot,priority:1" json:"ownerId"`
-	Owner     User      `gorm:"foreignKey:OwnerID" json:"-"`
-	Subject   string    `gorm:"size:255;not null" json:"subject"`
-	ClassName string    `gorm:"size:255;not null" json:"className"`
-	DayOfWeek int       `gorm:"type:tinyint;not null;uniqueIndex:uq_owner_slot,priority:2" json:"dayOfWeek"` // 0=日 … 6=土
-	Period    int       `gorm:"type:tinyint;not null;uniqueIndex:uq_owner_slot,priority:3" json:"period"`
+	ID        string `gorm:"primaryKey;size:32" json:"id"`
+	OwnerID   string `gorm:"size:64;not null;uniqueIndex:uq_owner_slot,priority:1" json:"ownerId"`
+	Owner     User   `gorm:"foreignKey:OwnerID" json:"-"`
+	Subject   string `gorm:"size:255;not null" json:"subject"`
+	ClassName string `gorm:"size:255;not null" json:"className"`
+	DayOfWeek int    `gorm:"type:tinyint;not null;uniqueIndex:uq_owner_slot,priority:2" json:"dayOfWeek"` // 0=日 … 6=土
+	Period    int    `gorm:"type:tinyint;not null;uniqueIndex:uq_owner_slot,priority:3" json:"period"`    // 開始時限
+	// 終了時限(連続した複数コマのとき)。0 や Period より小さい値は 1 コマ(= Period)として扱う
+	PeriodEnd int       `gorm:"type:tinyint;not null;default:0" json:"periodEnd"`
 	CreatedAt time.Time `gorm:"type:datetime(3)" json:"createdAt"`
 
 	// 先生の手動操作。時間割より優先される
@@ -75,6 +77,14 @@ type PushSubscription struct {
 	P256dh    string    `gorm:"size:255;not null"`
 	Auth      string    `gorm:"size:255;not null"`
 	CreatedAt time.Time `gorm:"type:datetime(3)"`
+}
+
+// 終了時限。古いルーム(period_end = 0)は 1 コマ
+func (r *Room) LastPeriod() int {
+	if r.PeriodEnd < r.Period {
+		return r.Period
+	}
+	return r.PeriodEnd
 }
 
 var allModels = []any{&User{}, &Room{}, &Enrollment{}, &Call{}, &Memo{}, &PushSubscription{}}
