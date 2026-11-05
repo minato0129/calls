@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,7 +96,7 @@ type Notification struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 	URL   string `json:"url"`
-	Kind  string `json:"kind"` // teacher-call / your-turn
+	Kind  string `json:"kind"` // teacher-call / your-turn / test
 }
 
 type Pusher struct {
@@ -102,6 +106,7 @@ type Pusher struct {
 
 func (p *Pusher) enabled() bool { return p.cfg.VapidPublic != "" && p.cfg.VapidPrivate != "" }
 
+// 非同期で送る(通常の通知用)
 func (p *Pusher) Send(userID string, n Notification) {
 	if !p.enabled() {
 		log.Printf("[push disabled] to=%s %s: %s", userID, n.Title, n.Body)
@@ -110,36 +115,70 @@ func (p *Pusher) Send(userID string, n Notification) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		subs, err := p.store.PushSubs(ctx, userID)
-		if err != nil {
-			log.Printf("push: list subs: %v", err)
-			return
-		}
-		payload, _ := json.Marshal(n)
-		for _, s := range subs {
-			resp, err := webpush.SendNotificationWithContext(ctx, payload, &webpush.Subscription{
-				Endpoint: s.Endpoint,
-				Keys:     webpush.Keys{P256dh: s.P256dh, Auth: s.Auth},
-			}, &webpush.Options{
-				Subscriber:      p.cfg.VapidSubject,
-				VAPIDPublicKey:  p.cfg.VapidPublic,
-				VAPIDPrivateKey: p.cfg.VapidPrivate,
-				TTL:             120,
-				Urgency:         webpush.UrgencyHigh,
-			})
-			if err != nil {
-				log.Printf("push: send: %v", err)
-				continue
-			}
-			resp.Body.Close()
-			// 購読が無効になっていたら消す
-			if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
-				_ = p.store.DeletePushSub(ctx, s.Endpoint)
-			} else if resp.StatusCode >= 300 {
-				log.Printf("push: status %d for %s", resp.StatusCode, userID)
-			}
-		}
+		_, _ = p.SendSync(ctx, userID, n)
 	}()
+}
+
+type PushResult struct {
+	Sent    int      `json:"sent"`
+	Failed  int      `json:"failed"`
+	Removed int      `json:"removed"` // 無効になっていて削除した登録
+	Errors  []string `json:"errors"`
+}
+
+// 登録済みの全端末に送り、結果を返す。結果はすべてログに出す
+func (p *Pusher) SendSync(ctx context.Context, userID string, n Notification) (*PushResult, error) {
+	subs, err := p.store.PushSubs(ctx, userID)
+	if err != nil {
+		log.Printf("push: list subs: %v", err)
+		return nil, err
+	}
+	res := &PushResult{Errors: []string{}}
+	if len(subs) == 0 {
+		log.Printf("push: to=%s kind=%s 登録された端末がありません", userID, n.Kind)
+		return res, nil
+	}
+	payload, _ := json.Marshal(n)
+	for _, s := range subs {
+		host := s.Endpoint
+		if u, err := url.Parse(s.Endpoint); err == nil {
+			host = u.Host // ログには送信先サービス(fcm / apple / mozilla)だけ出す
+		}
+		resp, err := webpush.SendNotificationWithContext(ctx, payload, &webpush.Subscription{
+			Endpoint: s.Endpoint,
+			Keys:     webpush.Keys{P256dh: s.P256dh, Auth: s.Auth},
+		}, &webpush.Options{
+			Subscriber:      p.cfg.VapidSubject,
+			VAPIDPublicKey:  p.cfg.VapidPublic,
+			VAPIDPrivateKey: p.cfg.VapidPrivate,
+			TTL:             120,
+			Urgency:         webpush.UrgencyHigh,
+		})
+		if err != nil {
+			res.Failed++
+			res.Errors = append(res.Errors, host+": "+err.Error())
+			log.Printf("push: to=%s kind=%s via=%s error: %v", userID, n.Kind, host, err)
+			continue
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		resp.Body.Close()
+		switch {
+		case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+			// 端末側で登録が取り消されている(iOS が通知を出さないプッシュを繰り返すと取り消すことがある)
+			res.Removed++
+			_ = p.store.DeletePushSub(ctx, s.Endpoint)
+			log.Printf("push: to=%s kind=%s via=%s status=%d 登録が無効なので削除しました", userID, n.Kind, host, resp.StatusCode)
+		case resp.StatusCode >= 300:
+			res.Failed++
+			msg := strings.TrimSpace(string(body))
+			res.Errors = append(res.Errors, fmt.Sprintf("%s: %d %s", host, resp.StatusCode, msg))
+			log.Printf("push: to=%s kind=%s via=%s status=%d body=%s", userID, n.Kind, host, resp.StatusCode, msg)
+		default:
+			res.Sent++
+			log.Printf("push: to=%s kind=%s via=%s status=%d ok", userID, n.Kind, host, resp.StatusCode)
+		}
+	}
+	return res, nil
 }
 
 // ================= 通知ロジック =================

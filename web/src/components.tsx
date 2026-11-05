@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from './api'
 import { useApp } from './app-context'
-import { enablePush, isIOS, isStandalone, pushSupported, pushUnsupportedReason, resyncPush } from './push'
+import { enablePush, isIOS, isStandalone, pushSupported, pushUnsupportedReason, resyncPush, sendTestPush } from './push'
 
 export function Header({ title, back, right }: { title: string; back?: string; right?: ReactNode }) {
   return (
@@ -24,8 +24,40 @@ export function LogoutButton() {
   )
 }
 
-// 通知の許可。許可済みなら何も出さない
-export function PushCard({ text }: { text: string }) {
+// 許可済みのときに出す「テスト通知」。結果(届いたか、なぜ失敗したか)をその場で表示する
+function PushTest() {
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
+  return (
+    <div className="push-test">
+      <button
+        className="link-btn"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true)
+          setResult(null)
+          try {
+            const r = await sendTestPush()
+            if (r.sent > 0) setResult({ ok: true, text: `送信しました(${r.sent}台)。数秒で通知が届けば正常です` })
+            else if (r.removed > 0) setResult({ ok: false, text: '端末の登録が無効になっていました。この画面を開き直して、もう一度試してください' })
+            else if (r.errors.length > 0) setResult({ ok: false, text: `送信に失敗しました: ${r.errors.join(' / ')}` })
+            else setResult({ ok: false, text: 'この端末の通知がサーバーに登録されていません。画面を開き直してください' })
+          } catch (e) {
+            setResult({ ok: false, text: (e as Error).message })
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        {busy ? '送信中…' : 'テスト通知を送る'}
+      </button>
+      {result && <p className={result.ok ? 'muted small' : 'error'}>{result.text}</p>}
+    </div>
+  )
+}
+
+// 通知の許可。許可済みなら(showTest のとき)テスト通知ボタンだけ出す
+export function PushCard({ text, showTest = false }: { text: string; showTest?: boolean }) {
   const { config } = useApp()
   const [state, setState] = useState<NotificationPermission | 'unsupported'>(
     pushSupported() ? Notification.permission : 'unsupported',
@@ -35,7 +67,7 @@ export function PushCard({ text }: { text: string }) {
 
   useEffect(() => { if (config) void resyncPush(config.vapidPublicKey) }, [config])
 
-  if (state === 'granted') return null
+  if (state === 'granted') return showTest ? <PushTest /> : null
   if (state === 'unsupported') {
     if (isIOS() && !isStandalone()) return null // iOS はホーム画面に追加してからでないと使えない(InstallCard で案内)
     return (

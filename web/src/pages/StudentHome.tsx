@@ -28,7 +28,7 @@ export default function StudentHome() {
       <main className="page stack">
         <p className="muted">{user?.name}</p>
         <InstallCard />
-        <PushCard text="自分の番が近づいたときに通知を受け取れるようにします" />
+        <PushCard text="自分の番が近づいたときに通知を受け取れるようにします" showTest />
 
         <div className="card stack center">
           <p>{data && data.rooms.length > 0 ? '今は受講中の授業の時間ではありません。' : 'まだ授業に参加していません。'}</p>

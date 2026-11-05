@@ -14,13 +14,10 @@ interface PushData { title: string; body: string; url: string; kind: string }
 self.addEventListener('push', (event) => {
   const data: PushData = event.data?.json() ?? { title: '呼び出し', body: '', url: '/', kind: '' }
   event.waitUntil((async () => {
+    // 開いている画面にも伝えて、音とバイブを鳴らす
     const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-    const visible = clients.find((c) => (c as WindowClient).visibilityState === 'visible')
-    if (visible) {
-      // アプリを前面で開いているときは通知を出さず、画面側で音とバイブを鳴らす
-      visible.postMessage({ type: 'push', ...data })
-      return
-    }
+    for (const c of clients) c.postMessage({ type: 'push', ...data })
+    // 通知は必ず表示する。iOS は通知を出さないプッシュが続くと登録を取り消すため、前面にいても省略しない
     await self.registration.showNotification(data.title, {
       body: data.body,
       icon: '/icon-192.png',

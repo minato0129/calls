@@ -56,9 +56,10 @@ func loadConfig() (*Config, error) {
 		ClientSecret:  os.Getenv("AZURE_CLIENT_SECRET"),
 		VapidPublic:   os.Getenv("VAPID_PUBLIC_KEY"),
 		VapidPrivate:  os.Getenv("VAPID_PRIVATE_KEY"),
-		VapidSubject:  env("VAPID_SUBJECT", "mailto:admin@example.com"),
-		ForceOpen:     env("FORCE_OPEN", "false") == "true",
-		Loc:           loc,
+		// webpush-go が自動で "mailto:" を付けるので、ここでは外しておく(二重になると Apple に拒否される)
+		VapidSubject: strings.TrimPrefix(env("VAPID_SUBJECT", "admin@example.com"), "mailto:"),
+		ForceOpen:    env("FORCE_OPEN", "false") == "true",
+		Loc:          loc,
 	}
 	sec, err := strconv.Atoi(env("RENOTIFY_SECONDS", "180"))
 	if err != nil || sec <= 0 {

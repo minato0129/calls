@@ -52,6 +52,7 @@ func (app *App) routes(e *echo.Echo) {
 
 	// Push
 	api.POST("/push/subscribe", app.handlePushSubscribe, login)
+	api.POST("/push/test", app.handlePushTest, login)
 }
 
 // エラーはすべて {"error": "..."} で返す(フロントがこの形を前提にしている)
@@ -450,4 +451,21 @@ func (app *App) handlePushSubscribe(c echo.Context) error {
 		return err
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// POST /api/push/test 自分の端末にテスト通知を送り、結果を返す
+func (app *App) handlePushTest(c echo.Context) error {
+	if !app.push.enabled() {
+		return echo.NewHTTPError(http.StatusConflict, "サーバーに VAPID 鍵が設定されていません(.env の VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY)")
+	}
+	res, err := app.push.SendSync(c.Request().Context(), currentUser(c).ID, Notification{
+		Title: "テスト通知",
+		Body:  "通知は正しく届いています",
+		URL:   "/",
+		Kind:  "test",
+	})
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, res)
 }
