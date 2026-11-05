@@ -1,5 +1,25 @@
 import { api } from './api'
 
+// 通知が使えない理由。使えるなら null
+export function pushUnsupportedReason(): string | null {
+  if (!window.isSecureContext) {
+    return `HTTPS ではないため通知が使えません(今のアドレス: ${location.origin})。` +
+      'PC なら http://localhost:8080 で、スマホならトンネルの https:// の URL で開いてください。'
+  }
+  if (isIOS() && !isStandalone()) {
+    return 'iPhone では、ホーム画面に追加したアプリから開いたときだけ通知が使えます。'
+  }
+  if (!('serviceWorker' in navigator)) {
+    return 'このブラウザでは通知が使えません。プライベート(シークレット)ウィンドウや、他のアプリ内のブラウザで開いていないか確認してください。'
+  }
+  if (!('PushManager' in window) || !('Notification' in window)) {
+    return isIOS()
+      ? 'この iOS では通知が使えません。iOS 16.4 以降にアップデートしてください。'
+      : 'このブラウザは Web Push に対応していません。Chrome / Edge / Safari / Firefox の最新版で開いてください。'
+  }
+  return null
+}
+
 export function pushSupported() {
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
 }
@@ -31,7 +51,12 @@ export async function enablePush(vapidPublicKey: string): Promise<'ok' | 'denied
   if (!vapidPublicKey) return 'no-key'
   const perm = await Notification.requestPermission()
   if (perm !== 'granted') return 'denied'
-  const reg = await navigator.serviceWorker.ready
+  // Service Worker の登録に失敗していると ready が永遠に終わらないので、時間を区切る
+  const reg = await Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Service Worker を登録できませんでした。ページを再読み込みしてください')), 10000)),
+  ])
   let sub = await reg.pushManager.getSubscription()
   if (!sub) {
     sub = await reg.pushManager.subscribe({

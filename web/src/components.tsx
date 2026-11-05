@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from './api'
 import { useApp } from './app-context'
-import { enablePush, isIOS, isStandalone, pushSupported, resyncPush } from './push'
+import { enablePush, isIOS, isStandalone, pushSupported, pushUnsupportedReason, resyncPush } from './push'
 
 export function Header({ title, back, right }: { title: string; back?: string; right?: ReactNode }) {
   return (
@@ -31,13 +31,19 @@ export function PushCard({ text }: { text: string }) {
     pushSupported() ? Notification.permission : 'unsupported',
   )
   const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
 
   useEffect(() => { if (config) void resyncPush(config.vapidPublicKey) }, [config])
 
   if (state === 'granted') return null
   if (state === 'unsupported') {
     if (isIOS() && !isStandalone()) return null // iOS はホーム画面に追加してからでないと使えない(InstallCard で案内)
-    return <div className="card note">この端末では通知が使えません。画面を開いたままにしてください。</div>
+    return (
+      <div className="card note">
+        <p><b>通知が使えません。</b>呼び出しの状況は画面を開いておけば自動で更新されます。</p>
+        <p className="small">{pushUnsupportedReason() ?? 'この端末では通知が使えません。'}</p>
+      </div>
+    )
   }
   if (state === 'denied') {
     return <div className="card note">通知がブロックされています。端末の設定からこのアプリの通知を許可してください。</div>
@@ -47,12 +53,22 @@ export function PushCard({ text }: { text: string }) {
       <p>{text}</p>
       <button
         className="btn primary"
+        disabled={busy}
         onClick={async () => {
-          const r = await enablePush(config?.vapidPublicKey ?? '')
-          if (r === 'ok') setState('granted')
-          else if (r === 'denied') setState('denied')
-          else if (r === 'no-key') setMsg('サーバー側で通知が設定されていません(VAPID鍵)')
-          else setState('unsupported')
+          setMsg('')
+          setBusy(true)
+          try {
+            const r = await enablePush(config?.vapidPublicKey ?? '')
+            if (r === 'ok') setState('granted')
+            else if (r === 'denied') setState('denied')
+            else if (r === 'no-key') setMsg('サーバー側で通知が設定されていません(.env の VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY)')
+            else setState('unsupported')
+          } catch (e) {
+            // Brave のように購読がブラウザ設定で止められている場合などはここに来る
+            setMsg(`通知の登録に失敗しました: ${(e as Error).message}`)
+          } finally {
+            setBusy(false)
+          }
         }}
       >
         通知をオンにする
