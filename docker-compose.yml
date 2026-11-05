@@ -47,6 +47,7 @@ services:
       VAPID_SUBJECT: ${VAPID_SUBJECT:-admin@example.com}
       FORCE_OPEN: ${FORCE_OPEN:-false}
       RENOTIFY_SECONDS: ${RENOTIFY_SECONDS:-180}
+      PERIODS: ${PERIODS:-}
     depends_on:
       mysql:
         condition: service_healthy
