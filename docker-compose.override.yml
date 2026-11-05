@@ -1,0 +1,30 @@
+# 開発構成(docker compose up で自動的に読み込まれる)
+#   server: air で .go の変更を検知して再ビルド・再起動
+#   web   : Vite 開発サーバー。保存するとブラウザに即反映(HMR は nginx 経由の WebSocket)
+
+services:
+  nginx:
+    environment:
+      WEB_UPSTREAM: web:5173
+
+  web:
+    build:
+      target: dev
+    environment:
+      VITE_POLLING: "true" # マウントしたフォルダの変更をポーリングで検知
+    volumes:
+      - ./web:/app
+      - web-node-modules:/app/node_modules # 手元の node_modules と混ざらないよう分ける
+
+  server:
+    build:
+      target: dev
+    volumes:
+      - ./server:/app
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+
+volumes:
+  web-node-modules:
+  go-mod-cache:
+  go-build-cache:

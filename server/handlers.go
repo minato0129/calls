@@ -1,0 +1,410 @@
+package main
+
+import (
+	"encoding/csv"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/labstack/echo/v4"
+)
+
+// ---------- routes ----------
+
+func (app *App) routes(e *echo.Echo) {
+	login := app.requireLogin
+	teacher := requireRole("TEACHER", "先生のみ利用できます")
+	student := requireRole("STUDENT", "学生のみ利用できます")
+
+	e.GET("/auth/login", app.handleLogin)
+	e.GET("/auth/callback", app.handleCallback)
+	e.POST("/auth/dev-login", app.handleDevLogin)
+	e.POST("/auth/logout", app.handleLogout)
+
+	api := e.Group("/api")
+	api.GET("/config", app.handleConfig)
+	api.GET("/me", func(c echo.Context) error { return c.JSON(http.StatusOK, currentUser(c)) }, login)
+
+	// 先生
+	api.GET("/rooms", app.handleListRooms, login, teacher)
+	api.POST("/rooms", app.handleCreateRoom, login, teacher)
+	api.DELETE("/rooms/:id", app.handleDeleteRoom, login, teacher)
+	api.POST("/rooms/:id/calls/:callId/done", app.handleFinishCall, login, teacher)
+	api.POST("/rooms/:id/ack", app.handleAck, login, teacher)
+	api.GET("/rooms/:id/memos", app.handleListMemos, login, teacher)
+	api.GET("/rooms/:id/memo-dates", app.handleMemoDates, login, teacher)
+	api.GET("/rooms/:id/memos.csv", app.handleMemosCSV, login, teacher)
+
+	// 先生・学生共通
+	api.GET("/rooms/:id", app.handleGetRoom, login)
+	api.GET("/rooms/:id/queue", app.handleQueue, login)
+	api.GET("/rooms/:id/events", app.handleEvents, login)
+
+	// 学生
+	api.POST("/join", app.handleJoin, login, student)
+	api.GET("/my/rooms", app.handleMyRooms, login, student)
+	api.POST("/rooms/:id/calls", app.handleCreateCall, login, student)
+	api.DELETE("/rooms/:id/calls/mine", app.handleCancelCall, login, student)
+
+	// Push
+	api.POST("/push/subscribe", app.handlePushSubscribe, login)
+}
+
+// エラーはすべて {"error": "..."} で返す(フロントがこの形を前提にしている)
+func errorHandler(err error, c echo.Context) {
+	if c.Response().Committed {
+		return
+	}
+	code, msg := http.StatusInternalServerError, "サーバーエラーが発生しました"
+	var he *echo.HTTPError
+	if errors.As(err, &he) {
+		code = he.Code
+		if s, ok := he.Message.(string); ok {
+			msg = s
+		} else {
+			msg = http.StatusText(code)
+		}
+	} else {
+		c.Logger().Error(err)
+	}
+	_ = c.JSON(code, map[string]string{"error": msg})
+}
+
+// ---------- helpers ----------
+
+func (app *App) withOpen(r *Room) *Room {
+	r.IsOpen = app.cfg.isOpen(r.DayOfWeek, r.Period, time.Now())
+	return r
+}
+
+func (app *App) loadRoom(c echo.Context) (*Room, error) {
+	room, err := app.store.GetRoom(c.Request().Context(), c.Param("id"))
+	if errors.Is(err, ErrNotFound) {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "ルームが見つかりません")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return app.withOpen(room), nil
+}
+
+// ルームのオーナー(先生)のみ
+func (app *App) ownerRoom(c echo.Context) (*Room, error) {
+	room, err := app.loadRoom(c)
+	if err != nil {
+		return nil, err
+	}
+	if room.OwnerID != currentUser(c).ID {
+		return nil, echo.NewHTTPError(http.StatusForbidden, "このルームの先生ではありません")
+	}
+	return room, nil
+}
+
+// オーナーか受講登録済みの学生
+func (app *App) memberRoom(c echo.Context) (*Room, error) {
+	room, err := app.loadRoom(c)
+	if err != nil {
+		return nil, err
+	}
+	u := currentUser(c)
+	if room.OwnerID == u.ID {
+		return room, nil
+	}
+	ok, err := app.store.IsEnrolled(c.Request().Context(), room.ID, u.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, echo.NewHTTPError(http.StatusForbidden, "このルームに参加していません。QRコードを読み取ってください")
+	}
+	return room, nil
+}
+
+func (app *App) handleConfig(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]any{
+		"authMode":       app.cfg.AuthMode,
+		"vapidPublicKey": app.cfg.VapidPublic,
+		"periods":        app.cfg.Periods,
+	})
+}
+
+// ---------- teacher ----------
+
+func (app *App) handleListRooms(c echo.Context) error {
+	rooms, err := app.store.ListRoomsByOwner(c.Request().Context(), currentUser(c).ID)
+	if err != nil {
+		return err
+	}
+	for _, r := range rooms {
+		app.withOpen(r)
+	}
+	return c.JSON(http.StatusOK, rooms)
+}
+
+func (app *App) handleCreateRoom(c echo.Context) error {
+	var in struct {
+		Subject   string `json:"subject"`
+		ClassName string `json:"className"`
+		DayOfWeek int    `json:"dayOfWeek"`
+		Period    int    `json:"period"`
+	}
+	if err := c.Bind(&in); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "入力が不正です")
+	}
+	in.Subject, in.ClassName = strings.TrimSpace(in.Subject), strings.TrimSpace(in.ClassName)
+	validPeriod := false
+	for _, p := range app.cfg.Periods {
+		validPeriod = validPeriod || p.No == in.Period
+	}
+	if in.Subject == "" || in.ClassName == "" || in.DayOfWeek < 0 || in.DayOfWeek > 6 || !validPeriod {
+		return echo.NewHTTPError(http.StatusBadRequest, "科目名・クラス名・曜日・時限を正しく入力してください")
+	}
+	u := currentUser(c)
+	room := &Room{OwnerID: u.ID, OwnerName: u.Name, Subject: in.Subject, ClassName: in.ClassName, DayOfWeek: in.DayOfWeek, Period: in.Period}
+	if err := app.store.CreateRoom(c.Request().Context(), room); errors.Is(err, ErrSlotTaken) {
+		return echo.NewHTTPError(http.StatusConflict, "同じ曜日・時限のルームがすでにあります")
+	} else if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusCreated, app.withOpen(room))
+}
+
+func (app *App) handleDeleteRoom(c echo.Context) error {
+	room, err := app.ownerRoom(c)
+	if err != nil {
+		return err
+	}
+	if err := app.store.DeleteRoom(c.Request().Context(), room.ID); err != nil {
+		return err
+	}
+	app.notifier.Ack(room.ID)
+	app.hub.publish(room.ID)
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (app *App) handleFinishCall(c echo.Context) error {
+	room, err := app.ownerRoom(c)
+	if err != nil {
+		return err
+	}
+	callID, err := strconv.ParseInt(c.Param("callId"), 10, 64)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "不正な呼び出しIDです")
+	}
+	var in struct {
+		Memo string `json:"memo"`
+	}
+	_ = c.Bind(&in)
+	if err := app.store.FinishCall(c.Request().Context(), room.ID, callID, strings.TrimSpace(in.Memo)); errors.Is(err, ErrNotFound) {
+		return echo.NewHTTPError(http.StatusConflict, "この呼び出しはすでに終了しています")
+	} else if err != nil {
+		return err
+	}
+	app.notifier.QueueChanged(room.ID, reasonDone)
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (app *App) handleAck(c echo.Context) error {
+	room, err := app.ownerRoom(c)
+	if err != nil {
+		return err
+	}
+	app.notifier.Ack(room.ID)
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (app *App) handleListMemos(c echo.Context) error {
+	room, err := app.ownerRoom(c)
+	if err != nil {
+		return err
+	}
+	memos, err := app.store.ListMemos(c.Request().Context(), room.ID, c.QueryParam("date"))
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, memos)
+}
+
+func (app *App) handleMemoDates(c echo.Context) error {
+	room, err := app.ownerRoom(c)
+	if err != nil {
+		return err
+	}
+	dates, err := app.store.MemoDates(c.Request().Context(), room.ID)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, dates)
+}
+
+func (app *App) handleMemosCSV(c echo.Context) error {
+	room, err := app.ownerRoom(c)
+	if err != nil {
+		return err
+	}
+	memos, err := app.store.ListMemos(c.Request().Context(), room.ID, "")
+	if err != nil {
+		return err
+	}
+	w := c.Response()
+	w.Header().Set(echo.HeaderContentType, "text/csv; charset=utf-8")
+	w.Header().Set(echo.HeaderContentDisposition, `attachment; filename="memos-`+room.ID+`.csv"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("\xEF\xBB\xBF")) // Excel で文字化けしないよう BOM を付ける
+	cw := csv.NewWriter(w)
+	_ = cw.Write([]string{"日時", "学籍メール", "氏名", "種別", "メモ"})
+	for _, m := range memos {
+		typ := ""
+		if m.CallType != nil {
+			typ = map[string]string{"QUESTION": "質問", "CHECK": "課題チェック"}[*m.CallType]
+		}
+		_ = cw.Write([]string{m.CreatedAt.In(app.cfg.Loc).Format("2006-01-02 15:04"), m.StudentEmail, m.StudentName, typ, m.Body})
+	}
+	cw.Flush()
+	return cw.Error()
+}
+
+// ---------- shared ----------
+
+func (app *App) handleGetRoom(c echo.Context) error {
+	room, err := app.memberRoom(c)
+	if err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, room)
+}
+
+type queueCounts struct {
+	Total    int `json:"total"`
+	Question int `json:"question"`
+	Check    int `json:"check"`
+}
+
+func (app *App) handleQueue(c echo.Context) error {
+	room, err := app.memberRoom(c)
+	if err != nil {
+		return err
+	}
+	calls, err := app.store.WaitingCalls(c.Request().Context(), room.ID)
+	if err != nil {
+		return err
+	}
+	var cnt queueCounts
+	cnt.Total = len(calls)
+	for _, cl := range calls {
+		if cl.Type == "QUESTION" {
+			cnt.Question++
+		} else {
+			cnt.Check++
+		}
+	}
+	u := currentUser(c)
+	if room.OwnerID == u.ID {
+		// 先生には先頭2人まで
+		head := calls
+		if len(head) > 2 {
+			head = head[:2]
+		}
+		return c.JSON(http.StatusOK, map[string]any{"counts": cnt, "head": head, "isOpen": room.IsOpen, "serverTime": time.Now().UTC()})
+	}
+	// 学生には自分の順番だけ(他の学生の名前は見せない)
+	position, myType := 0, ""
+	for i, cl := range calls {
+		if cl.StudentID == u.ID {
+			position, myType = i+1, cl.Type
+			break
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"counts": cnt, "position": position, "myType": myType, "isOpen": room.IsOpen})
+}
+
+// ---------- student ----------
+
+func (app *App) handleJoin(c echo.Context) error {
+	var in struct {
+		RoomID string `json:"roomId"`
+	}
+	if err := c.Bind(&in); err != nil || in.RoomID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "QRコードが不正です")
+	}
+	ctx := c.Request().Context()
+	room, err := app.store.GetRoom(ctx, in.RoomID)
+	if errors.Is(err, ErrNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "ルームが見つかりません")
+	} else if err != nil {
+		return err
+	}
+	if err := app.store.Enroll(ctx, room.ID, currentUser(c).ID); err != nil {
+		return err
+	}
+	return c.JSON(http.StatusOK, app.withOpen(room))
+}
+
+// 受講中のルーム一覧と、今開いているルーム
+func (app *App) handleMyRooms(c echo.Context) error {
+	rooms, err := app.store.ListEnrolledRooms(c.Request().Context(), currentUser(c).ID)
+	if err != nil {
+		return err
+	}
+	var current *Room
+	for _, r := range rooms {
+		app.withOpen(r)
+		if r.IsOpen && current == nil {
+			current = r
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"rooms": rooms, "current": current})
+}
+
+func (app *App) handleCreateCall(c echo.Context) error {
+	room, err := app.memberRoom(c)
+	if err != nil {
+		return err
+	}
+	if !room.IsOpen {
+		return echo.NewHTTPError(http.StatusConflict, "授業時間外です")
+	}
+	var in struct {
+		Type string `json:"type"`
+	}
+	if err := c.Bind(&in); err != nil || (in.Type != "QUESTION" && in.Type != "CHECK") {
+		return echo.NewHTTPError(http.StatusBadRequest, "呼び出しの種類が不正です")
+	}
+	if err := app.store.CreateCall(c.Request().Context(), room.ID, currentUser(c).ID, in.Type); errors.Is(err, ErrAlreadyWaiting) {
+		return echo.NewHTTPError(http.StatusConflict, "すでに呼び出し中です")
+	} else if err != nil {
+		return err
+	}
+	app.notifier.QueueChanged(room.ID, reasonCalled)
+	return c.NoContent(http.StatusCreated)
+}
+
+func (app *App) handleCancelCall(c echo.Context) error {
+	room, err := app.memberRoom(c)
+	if err != nil {
+		return err
+	}
+	changed, err := app.store.CancelMyCall(c.Request().Context(), room.ID, currentUser(c).ID)
+	if err != nil {
+		return err
+	}
+	if changed {
+		app.notifier.QueueChanged(room.ID, reasonCancelled)
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// ---------- push ----------
+
+func (app *App) handlePushSubscribe(c echo.Context) error {
+	var in PushSubInput
+	if err := c.Bind(&in); err != nil || in.Endpoint == "" || in.Keys.P256dh == "" || in.Keys.Auth == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "購読情報が不正です")
+	}
+	if err := app.store.SavePushSub(c.Request().Context(), currentUser(c).ID, &in); err != nil {
+		return err
+	}
+	return c.NoContent(http.StatusNoContent)
+}

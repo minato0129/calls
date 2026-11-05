@@ -1,0 +1,83 @@
+# コンテナ構成
+#   nginx(入口 :8080) ─┬─ /api, /auth → server(Go / Echo + GORM)→ mysql
+#                       └─ それ以外    → web(React)
+#
+# docker compose up -d --build
+#   → docker-compose.override.yml も自動で読み込まれ、開発構成(ホットリロード)で起動
+# docker compose -f docker-compose.yml up -d --build
+#   → 本番構成(Go はバイナリ、React はビルド済みファイルを配信)
+# docker compose --profile tunnel up -d
+#   → スマホ確認用の HTTPS URL を発行(docker compose logs tunnel に表示)
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    environment:
+      API_UPSTREAM: server:8080
+      WEB_UPSTREAM: web:80
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+    depends_on:
+      - server
+      - web
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      target: prod
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ./server
+      target: prod
+    environment:
+      DATABASE_DSN: callsys:${MYSQL_PASSWORD:-callsys}@tcp(mysql:3306)/callsys
+      BASE_URL: ${BASE_URL:-http://localhost:8080}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-secret-change-me}
+      AUTH_MODE: ${AUTH_MODE:-dev}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
+      FORCE_OPEN: ${FORCE_OPEN:-false}
+      RENOTIFY_SECONDS: ${RENOTIFY_SECONDS:-180}
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: callsys
+      MYSQL_USER: callsys
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-callsys}
+      TZ: UTC
+    ports:
+      - "3306:3306" # 手元のツールから DB を見る用。不要なら消してよい
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # スマホで試すための一時的な HTTPS URL(Cloudflare Quick Tunnel)
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://nginx:80
+    depends_on:
+      - nginx
+    profiles: ["tunnel"]
+
+volumes:
+  mysql-data:

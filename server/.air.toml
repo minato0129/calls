@@ -1,0 +1,20 @@
+# .go を保存したら再ビルドして再起動する(docker compose の開発構成で使用)
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/callsys ."
+entrypoint = ["./tmp/callsys"]
+include_ext = ["go"]
+exclude_dir = ["tmp"]
+delay = 300
+# Windows や一部の環境ではマウントしたフォルダの変更通知が届かないのでポーリングで監視する
+poll = true
+poll_interval = 500
+stop_on_error = true
+
+[log]
+time = false
+
+[misc]
+clean_on_exit = true
