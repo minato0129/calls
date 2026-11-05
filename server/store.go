@@ -127,6 +127,12 @@ func (s *Store) ListEnrolledRooms(ctx context.Context, userID string) ([]*Room, 
 	return fillOwner(rooms), err
 }
 
+// 手動の開始・終了を保存する(nil は解除)
+func (s *Store) SetManualState(ctx context.Context, id string, openUntil, closedUntil *time.Time) error {
+	return s.db.WithContext(ctx).Model(&Room{}).Where("id = ?", id).
+		Updates(map[string]any{"open_until": openUntil, "closed_until": closedUntil}).Error
+}
+
 func (s *Store) DeleteRoom(ctx context.Context, id string) error {
 	return s.db.WithContext(ctx).Delete(&Room{}, "id = ?", id).Error
 }

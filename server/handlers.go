@@ -33,6 +33,8 @@ func (app *App) routes(e *echo.Echo) {
 	api.DELETE("/rooms/:id", app.handleDeleteRoom, login, teacher)
 	api.POST("/rooms/:id/calls/:callId/done", app.handleFinishCall, login, teacher)
 	api.POST("/rooms/:id/ack", app.handleAck, login, teacher)
+	api.POST("/rooms/:id/open", app.handleOpenRoom, login, teacher)
+	api.POST("/rooms/:id/close", app.handleCloseRoom, login, teacher)
 	api.GET("/rooms/:id/memos", app.handleListMemos, login, teacher)
 	api.GET("/rooms/:id/memo-dates", app.handleMemoDates, login, teacher)
 	api.GET("/rooms/:id/memos.csv", app.handleMemosCSV, login, teacher)
@@ -75,7 +77,7 @@ func errorHandler(err error, c echo.Context) {
 // ---------- helpers ----------
 
 func (app *App) withOpen(r *Room) *Room {
-	r.IsOpen = app.cfg.isOpen(r.DayOfWeek, r.Period, time.Now())
+	r.IsOpen = app.cfg.roomOpen(r, time.Now())
 	return r
 }
 
@@ -204,6 +206,47 @@ func (app *App) handleFinishCall(c echo.Context) error {
 	}
 	app.notifier.QueueChanged(room.ID, reasonDone)
 	return c.NoContent(http.StatusNoContent)
+}
+
+// 手動で開始したときに開いておく長さ(1コマ分 + 余裕)
+const manualOpenDuration = 100 * time.Minute
+
+// POST /api/rooms/:id/open 「授業を開始」。時間割に関係なく、今から 100 分間開く
+func (app *App) handleOpenRoom(c echo.Context) error {
+	room, err := app.ownerRoom(c)
+	if err != nil {
+		return err
+	}
+	until := now().Add(manualOpenDuration)
+	if err := app.store.SetManualState(c.Request().Context(), room.ID, &until, nil); err != nil {
+		return err
+	}
+	room.OpenUntil, room.ClosedUntil = &until, nil
+	app.hub.publish(room.ID) // 学生の画面を更新させる
+	return c.JSON(http.StatusOK, app.withOpen(room))
+}
+
+// POST /api/rooms/:id/close 「授業を終了」。時間割上の授業中なら、その時限が終わるまで閉じたままにする
+func (app *App) handleCloseRoom(c echo.Context) error {
+	room, err := app.ownerRoom(c)
+	if err != nil {
+		return err
+	}
+	ctx := c.Request().Context()
+	var closedUntil *time.Time
+	if end, ok := app.cfg.scheduledEnd(room.DayOfWeek, room.Period, time.Now()); ok {
+		closedUntil = &end
+	}
+	if err := app.store.SetManualState(ctx, room.ID, nil, closedUntil); err != nil {
+		return err
+	}
+	// 残っている呼び出しは取り消す
+	if err := app.store.CancelAllWaiting(ctx, room.ID); err != nil {
+		return err
+	}
+	room.OpenUntil, room.ClosedUntil = nil, closedUntil
+	app.notifier.QueueChanged(room.ID, reasonClosed) // SSE の通知も含む
+	return c.JSON(http.StatusOK, app.withOpen(room))
 }
 
 func (app *App) handleAck(c echo.Context) error {

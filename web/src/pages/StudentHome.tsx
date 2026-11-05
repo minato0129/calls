@@ -9,8 +9,14 @@ export default function StudentHome() {
   const [data, setData] = useState<{ rooms: Room[]; current: Room | null } | null>(null)
   const [error, setError] = useState('')
 
+  // 先生が授業を開始したら自動でルームへ入れるよう、15秒ごとと画面に戻ったときに確認する
   useEffect(() => {
-    api.myRooms().then(setData).catch((e) => setError(e.message))
+    const load = () => api.myRooms().then((d) => { setData(d); setError('') }).catch((e) => setError(e.message))
+    void load()
+    const t = window.setInterval(load, 15000)
+    const onVisible = () => { if (document.visibilityState === 'visible') void load() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { window.clearInterval(t); document.removeEventListener('visibilitychange', onVisible) }
   }, [])
 
   // 受講中の授業が今開いていればそのままルームへ
@@ -34,12 +40,13 @@ export default function StudentHome() {
           <section className="stack-sm">
             <h2>受講中の授業</h2>
             {data.rooms.map((r) => (
-              <div key={r.id} className="card room-row">
+              <Link key={r.id} to={`/rooms/${r.id}`} className="card room-row">
                 <div>
                   <div className="room-title">{r.subject}</div>
                   <div className="muted small">{r.className} ・ {slotLabel(r)} ・ {r.ownerName}</div>
                 </div>
-              </div>
+                <span className="badge">授業時間外</span>
+              </Link>
             ))}
           </section>
         )}

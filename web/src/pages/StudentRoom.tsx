@@ -13,8 +13,13 @@ export default function StudentRoom() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
 
+  const [loadError, setLoadError] = useState('')
+
   const load = useCallback(async () => {
-    try { setQueue(await api.studentQueue(id)) } catch (e) { setError((e as Error).message) }
+    try {
+      setQueue(await api.studentQueue(id))
+      setLoadError('')
+    } catch (e) { setLoadError((e as Error).message) }
   }, [id])
 
   useEffect(() => { api.room(id).then(setRoom).catch((e) => setError(e.message)) }, [id])
@@ -44,8 +49,20 @@ export default function StudentRoom() {
         <PushCard text="自分の番が近づいたときに通知を受け取れるようにします" />
 
         <section className={`card status ${waiting ? (queue!.position === 1 ? 'next' : 'waiting') : ''}`} aria-live="polite">
-          {!open ? (
-            <p>授業時間外です</p>
+          {loadError ? (
+            // 通信に失敗したときは「授業時間外」と区別して原因を出す
+            <>
+              <p><b>状況を取得できませんでした</b></p>
+              <p className="error">{loadError}</p>
+              <button className="btn" onClick={() => void load()}>再読み込み</button>
+            </>
+          ) : !queue ? (
+            <p className="muted">読み込み中…</p>
+          ) : !open ? (
+            <>
+              <p>授業時間外です</p>
+              <p className="muted small">先生が授業を開始すると、自動で呼び出せるようになります</p>
+            </>
           ) : waiting ? (
             <>
               <p className="muted small">{CALL_LABEL[queue!.myType as CallType]}で呼び出し中</p>
