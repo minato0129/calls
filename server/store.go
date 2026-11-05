@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -43,6 +44,9 @@ func openStore(dsn string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := migrateMemosToLessons(db); err != nil {
+		return nil, fmt.Errorf("メモの移行: %w", err)
+	}
 	if err := db.AutoMigrate(allModels...); err != nil {
 		return nil, err
 	}
@@ -50,6 +54,38 @@ func openStore(dsn string) (*Store, error) {
 	sqlDB.SetMaxOpenConns(20)
 	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	return &Store{db: db}, nil
+}
+
+// 以前は呼び出しごとにメモを作っていたので、授業日の列を足し、同じ授業日のメモを1枚にまとめる。
+// AutoMigrate が一意インデックスを作る前に済ませておく必要がある(重複があると作れない)
+func migrateMemosToLessons(db *gorm.DB) error {
+	m := db.Migrator()
+	if !m.HasTable(&Memo{}) || m.HasColumn(&Memo{}, "LessonDate") {
+		return nil
+	}
+	log.Println("メモを授業ごとの1枚にまとめています")
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, q := range []string{
+			`ALTER TABLE memos ADD COLUMN lesson_date CHAR(10) NOT NULL DEFAULT ''`,
+			`ALTER TABLE memos ADD COLUMN updated_at DATETIME(3) NULL`,
+			`UPDATE memos SET lesson_date = DATE_FORMAT(CONVERT_TZ(created_at, '+00:00', '+09:00'), '%Y-%m-%d'), updated_at = created_at`,
+			`SET SESSION group_concat_max_len = 1048576`,
+			// 同じ授業日のメモは、本文を時刻順に改行でつないで、いちばん新しい1枚に残す
+			`UPDATE memos m JOIN (
+				SELECT MAX(id) AS id, GROUP_CONCAT(body ORDER BY created_at SEPARATOR '\n') AS body, MAX(created_at) AS updated
+				FROM memos GROUP BY room_id, student_id, lesson_date HAVING COUNT(*) > 1
+			) g ON m.id = g.id SET m.body = g.body, m.updated_at = g.updated`,
+			`DELETE m FROM memos m JOIN (
+				SELECT room_id, student_id, lesson_date, MAX(id) AS keep_id
+				FROM memos GROUP BY room_id, student_id, lesson_date HAVING COUNT(*) > 1
+			) g ON m.room_id = g.room_id AND m.student_id = g.student_id AND m.lesson_date = g.lesson_date AND m.id <> g.keep_id`,
+		} {
+			if err := tx.Exec(q).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func now() time.Time { return time.Now().UTC() }
@@ -237,8 +273,8 @@ func (s *Store) CancelMyCall(ctx context.Context, roomID, studentID string) (boo
 	return res.RowsAffected > 0, res.Error
 }
 
-// 対応済にする。メモが空でなければ保存する
-func (s *Store) FinishCall(ctx context.Context, roomID string, callID int64, memo string) error {
+// 対応済にする。メモはこの授業(lessonDate)の1枚に上書き保存し、空にしたら削除する
+func (s *Store) FinishCall(ctx context.Context, roomID string, callID int64, memo, lessonDate string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var c Call
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -250,10 +286,54 @@ func (s *Store) FinishCall(ctx context.Context, roomID string, callID int64, mem
 			return err
 		}
 		if memo == "" {
-			return nil
+			return tx.Where("room_id = ? AND student_id = ? AND lesson_date = ?", roomID, c.StudentID, lessonDate).
+				Delete(&Memo{}).Error
 		}
-		return tx.Omit("Student", "Call").Create(&Memo{RoomID: roomID, StudentID: c.StudentID, CallID: &c.ID, Body: memo, CreatedAt: t}).Error
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "room_id"}, {Name: "student_id"}, {Name: "lesson_date"}},
+			DoUpdates: clause.AssignmentColumns([]string{"body", "call_id", "updated_at"}),
+		}).Omit("Student", "Call").Create(&Memo{
+			RoomID: roomID, StudentID: c.StudentID, LessonDate: lessonDate, CallID: &c.ID, Body: memo, CreatedAt: t, UpdatedAt: t,
+		}).Error
 	})
+}
+
+// 先頭の学生について、この授業のメモと呼び出し回数を埋める(先生の画面用)
+func (s *Store) FillLessonInfo(ctx context.Context, roomID, lessonDate string, lessonStart time.Time, calls []CallView) error {
+	if len(calls) == 0 {
+		return nil
+	}
+	ids := make([]string, len(calls))
+	for i, c := range calls {
+		ids[i] = c.StudentID
+	}
+	var memos []Memo
+	if err := s.db.WithContext(ctx).Where("room_id = ? AND lesson_date = ? AND student_id IN ?", roomID, lessonDate, ids).
+		Find(&memos).Error; err != nil {
+		return err
+	}
+	var counts []struct {
+		StudentID string
+		N         int
+	}
+	if err := s.db.WithContext(ctx).Model(&Call{}).Select("student_id, COUNT(*) AS n").
+		Where("room_id = ? AND student_id IN ? AND created_at >= ? AND status <> ?", roomID, ids, lessonStart, "CANCELLED").
+		Group("student_id").Scan(&counts).Error; err != nil {
+		return err
+	}
+	memoBy := map[string]string{}
+	for _, m := range memos {
+		memoBy[m.StudentID] = m.Body
+	}
+	countBy := map[string]int{}
+	for _, c := range counts {
+		countBy[c.StudentID] = c.N
+	}
+	for i := range calls {
+		calls[i].Memo = memoBy[calls[i].StudentID]
+		calls[i].CallsToday = countBy[calls[i].StudentID]
+	}
+	return nil
 }
 
 func (s *Store) RoomsWithWaitingCalls(ctx context.Context) ([]string, error) {
@@ -270,19 +350,20 @@ func (s *Store) CancelAllWaiting(ctx context.Context, roomID string) error {
 
 // ---------- memos ----------
 
-// date は JST の "YYYY-MM-DD"。空なら全件
+// date は授業日(JST "YYYY-MM-DD")。空なら全件
 func (s *Store) ListMemos(ctx context.Context, roomID, date string) ([]MemoView, error) {
 	q := s.db.WithContext(ctx).Joins("Student").Preload("Call").Where("memos.room_id = ?", roomID)
 	if date != "" {
-		q = q.Where("DATE(CONVERT_TZ(memos.created_at, '+00:00', '+09:00')) = ?", date)
+		q = q.Where("memos.lesson_date = ?", date)
 	}
 	var memos []Memo
-	if err := q.Order("Student.email, memos.created_at").Find(&memos).Error; err != nil {
+	if err := q.Order("memos.lesson_date DESC, Student.email").Find(&memos).Error; err != nil {
 		return nil, err
 	}
 	views := make([]MemoView, len(memos))
 	for i, m := range memos {
-		v := MemoView{ID: m.ID, StudentID: m.StudentID, StudentName: m.Student.Name, StudentEmail: m.Student.Email, Body: m.Body, CreatedAt: m.CreatedAt}
+		v := MemoView{ID: m.ID, StudentID: m.StudentID, StudentName: m.Student.Name, StudentEmail: m.Student.Email,
+			Body: m.Body, LessonDate: m.LessonDate, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt}
 		if m.Call != nil {
 			t := m.Call.Type
 			v.CallType = &t
@@ -294,9 +375,8 @@ func (s *Store) ListMemos(ctx context.Context, roomID, date string) ([]MemoView,
 
 func (s *Store) MemoDates(ctx context.Context, roomID string) ([]string, error) {
 	dates := []string{}
-	err := s.db.WithContext(ctx).Raw(`
-		SELECT DISTINCT DATE_FORMAT(CONVERT_TZ(created_at, '+00:00', '+09:00'), '%Y-%m-%d') AS d
-		FROM memos WHERE room_id = ? ORDER BY d DESC`, roomID).Scan(&dates).Error
+	err := s.db.WithContext(ctx).Model(&Memo{}).Where("room_id = ?", roomID).
+		Distinct().Order("lesson_date DESC").Pluck("lesson_date", &dates).Error
 	return dates, err
 }
 

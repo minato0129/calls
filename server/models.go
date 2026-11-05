@@ -58,15 +58,18 @@ type Call struct {
 	ResolvedAt *time.Time `gorm:"type:datetime(3)"`
 }
 
+// メモは「ルーム × 学生 × 授業日」で1枚。同じ授業で何度呼び出しても、同じメモを上書きする
 type Memo struct {
-	ID        int64     `gorm:"primaryKey;autoIncrement"`
-	RoomID    string    `gorm:"size:32;not null;index"`
-	StudentID string    `gorm:"size:64;not null"`
-	Student   User      `gorm:"foreignKey:StudentID"`
-	CallID    *int64    `gorm:"index"`
-	Call      *Call     `gorm:"foreignKey:CallID;constraint:OnDelete:SET NULL"`
-	Body      string    `gorm:"type:text;not null"`
-	CreatedAt time.Time `gorm:"type:datetime(3);index"`
+	ID         int64     `gorm:"primaryKey;autoIncrement"`
+	RoomID     string    `gorm:"size:32;not null;index;uniqueIndex:uq_memo_lesson,priority:1"`
+	StudentID  string    `gorm:"size:64;not null;uniqueIndex:uq_memo_lesson,priority:2"`
+	LessonDate string    `gorm:"type:char(10);not null;default:'';uniqueIndex:uq_memo_lesson,priority:3"` // 授業日(JST "YYYY-MM-DD")
+	Student    User      `gorm:"foreignKey:StudentID"`
+	CallID     *int64    `gorm:"index"` // 最後に書いたときの呼び出し
+	Call       *Call     `gorm:"foreignKey:CallID;constraint:OnDelete:SET NULL"`
+	Body       string    `gorm:"type:text;not null"`
+	CreatedAt  time.Time `gorm:"type:datetime(3);index"`
+	UpdatedAt  time.Time `gorm:"type:datetime(3)"`
 }
 
 type PushSubscription struct {
@@ -97,6 +100,10 @@ type CallView struct {
 	StudentName string    `json:"studentName"`
 	Type        string    `json:"type"` // QUESTION / CHECK
 	CreatedAt   time.Time `json:"createdAt"`
+
+	// 先生の画面用(学生には返さない)
+	Memo       string `json:"memo,omitempty"`       // この授業で書いたメモ(上書きされる)
+	CallsToday int    `json:"callsToday,omitempty"` // この授業での呼び出し回数(今回を含む)
 }
 
 type MemoView struct {
@@ -106,7 +113,9 @@ type MemoView struct {
 	StudentEmail string    `json:"studentEmail"`
 	CallType     *string   `json:"callType"`
 	Body         string    `json:"body"`
+	LessonDate   string    `json:"lessonDate"`
 	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 // フロントから受け取る Push 購読情報(PushSubscription.toJSON() の形)

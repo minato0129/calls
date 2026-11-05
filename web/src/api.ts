@@ -21,7 +21,15 @@ export interface Room {
 }
 
 export interface Counts { total: number; question: number; check: number }
-export interface Call { id: number; studentId: string; studentName: string; type: CallType; createdAt: string }
+export interface Call {
+  id: number
+  studentId: string
+  studentName: string
+  type: CallType
+  createdAt: string
+  memo?: string       // この授業で書いたメモ(先生の画面のみ)。対応済で上書きされる
+  callsToday?: number // この授業での呼び出し回数(今回を含む)
+}
 export interface TeacherQueue { counts: Counts; head: Call[]; isOpen: boolean; serverTime: string }
 export interface StudentQueue { counts: Counts; position: number; myType: CallType | ''; isOpen: boolean }
 
@@ -32,7 +40,9 @@ export interface Memo {
   studentEmail: string
   callType: CallType | null
   body: string
+  lessonDate: string // 授業日(YYYY-MM-DD)。メモは授業ごとに1枚
   createdAt: string
+  updatedAt: string
 }
 
 export class ApiError extends Error {

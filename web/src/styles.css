@@ -150,3 +150,7 @@ textarea { resize: vertical; }
 /* 行の中の小さなリンクボタン */
 .link-btn.inline { padding: 0 4px; color: var(--brand); font-weight: 600; font-size: inherit; }
 .dialog { max-height: 90dvh; overflow-y: auto; }
+
+/* 呼び出しの補足(何回目・メモあり) */
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip.plain { background: var(--line); color: var(--muted); }

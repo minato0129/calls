@@ -116,11 +116,15 @@ export default function TeacherRoom() {
         <section className="stack">
           {queue && queue.head.length === 0 && <p className="center muted pad">呼び出しはありません</p>}
           {queue?.head.map((c, i) => (
-            <button key={c.id} className={`card call-row ${i === 0 ? 'first' : ''}`} onClick={() => { setSelected(c); setMemo('') }}>
+            <button key={c.id} className={`card call-row ${i === 0 ? 'first' : ''}`} onClick={() => { setSelected(c); setMemo(c.memo ?? '') }}>
               <span className="call-no">{i + 1}</span>
               <span className="call-body">
                 <span className="call-name">{c.studentName}</span>
-                <span className={`chip ${c.type === 'CHECK' ? 'check' : 'question'}`}>{CALL_LABEL[c.type]}</span>
+                <span className="chips">
+                  <span className={`chip ${c.type === 'CHECK' ? 'check' : 'question'}`}>{CALL_LABEL[c.type]}</span>
+                  {(c.callsToday ?? 0) > 1 && <span className="chip plain">{c.callsToday}回目</span>}
+                  {c.memo && <span className="chip plain">メモあり</span>}
+                </span>
               </span>
               <span className="call-time">{elapsed(c.createdAt, now)}</span>
             </button>
@@ -168,10 +172,12 @@ export default function TeacherRoom() {
           <div className="dialog stack" role="dialog" aria-modal onClick={(e) => e.stopPropagation()}>
             <h2>{selected.studentName}</h2>
             <p><span className={`chip ${selected.type === 'CHECK' ? 'check' : 'question'}`}>{CALL_LABEL[selected.type]}</span> ・ {elapsed(selected.createdAt, now)}待ち</p>
-            <label>メモ(任意)
-              <textarea rows={3} value={memo} onChange={(e) => setMemo(e.target.value)}
+            {(selected.callsToday ?? 0) > 1 && <p className="muted small">この授業で{selected.callsToday}回目の呼び出しです</p>}
+            <label>{selected.memo ? 'この授業のメモ(編集すると上書きされます)' : 'メモ(任意)'}
+              <textarea rows={4} value={memo} onChange={(e) => setMemo(e.target.value)}
                 placeholder={selected.type === 'CHECK' ? '例: 課題3 チェック済' : '例: センサーの配線について'} />
             </label>
+            <p className="hint">メモは授業ごとに1人1枚です。{selected.memo ? '空にして対応済にするとメモは削除されます。' : 'この授業でまた呼び出されたときは、このメモが表示されます。'}</p>
             <div className="row">
               <button className="btn" onClick={() => setSelected(null)}>キャンセル</button>
               <button
