@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,16 +63,20 @@ func (app *App) handleEvents(c echo.Context) error {
 	}
 	w := c.Response()
 	w.Header().Set(echo.HeaderContentType, "text/event-stream")
-	w.Header().Set(echo.HeaderCacheControl, "no-cache")
+	// no-transform: Cloudflare などが圧縮のために溜め込まないようにする
+	w.Header().Set(echo.HeaderCacheControl, "no-cache, no-transform")
 	w.Header().Set("X-Accel-Buffering", "no") // nginx にバッファさせない
 	w.WriteHeader(http.StatusOK)
 
 	ch := app.hub.subscribe(room.ID)
 	defer app.hub.unsubscribe(room.ID, ch)
 
-	_, _ = w.Write([]byte("event: queue\ndata: {}\n\n"))
+	// 一部のプロキシは最初に一定量が溜まるまで送らないので、2KB のコメントで押し出す
+	_, _ = w.Write([]byte(":" + strings.Repeat(" ", 2048) + "\n\n"))
+	_, _ = w.Write([]byte("retry: 3000\nevent: queue\ndata: {}\n\n"))
 	w.Flush()
-	heartbeat := time.NewTicker(25 * time.Second)
+	// クライアントが「接続が生きている」と分かるよう、コメントではなくイベントとして送る
+	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 	for {
 		select {
@@ -80,7 +85,7 @@ func (app *App) handleEvents(c echo.Context) error {
 		case <-ch:
 			_, _ = w.Write([]byte("event: queue\ndata: {}\n\n"))
 		case <-heartbeat.C:
-			_, _ = w.Write([]byte(": ping\n\n"))
+			_, _ = w.Write([]byte("event: ping\ndata: {}\n\n"))
 		}
 		w.Flush()
 	}
