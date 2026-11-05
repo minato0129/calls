@@ -171,3 +171,12 @@ func (c *Config) roomOpen(r *Room, now time.Time) bool {
 	}
 	return c.scheduledOpen(r.DayOfWeek, r.Period, r.LastPeriod(), now)
 }
+
+// 授業日(JST の "YYYY-MM-DD")。メモはこの日付ごとに1枚
+func (c *Config) lessonDate(t time.Time) string { return t.In(c.Loc).Format("2006-01-02") }
+
+// その日(JST)の 0 時
+func (c *Config) dayStart(t time.Time) time.Time {
+	lt := t.In(c.Loc)
+	return time.Date(lt.Year(), lt.Month(), lt.Day(), 0, 0, 0, 0, c.Loc)
+}

@@ -59,8 +59,8 @@ export default function Memos() {
             {list.map((m) => (
               <div key={m.id} className="memo">
                 <span className="muted small">
-                  {new Date(m.createdAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
-                  {m.callType && ` ・ ${CALL_LABEL[m.callType]}`}
+                  {new Date(m.updatedAt).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} 更新
+                  {m.callType && ` ・ 最後の呼び出し: ${CALL_LABEL[m.callType]}`}
                 </span>
                 <p>{m.body}</p>
               </div>

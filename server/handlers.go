@@ -255,7 +255,7 @@ func (app *App) handleFinishCall(c echo.Context) error {
 		Memo string `json:"memo"`
 	}
 	_ = c.Bind(&in)
-	if err := app.store.FinishCall(c.Request().Context(), room.ID, callID, strings.TrimSpace(in.Memo)); errors.Is(err, ErrNotFound) {
+	if err := app.store.FinishCall(c.Request().Context(), room.ID, callID, strings.TrimSpace(in.Memo), app.cfg.lessonDate(time.Now())); errors.Is(err, ErrNotFound) {
 		return echo.NewHTTPError(http.StatusConflict, "この呼び出しはすでに終了しています")
 	} else if err != nil {
 		return err
@@ -353,13 +353,13 @@ func (app *App) handleMemosCSV(c echo.Context) error {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("\xEF\xBB\xBF")) // Excel で文字化けしないよう BOM を付ける
 	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"日時", "学籍メール", "氏名", "種別", "メモ"})
+	_ = cw.Write([]string{"授業日", "最終更新", "学籍メール", "氏名", "種別", "メモ"})
 	for _, m := range memos {
 		typ := ""
 		if m.CallType != nil {
 			typ = map[string]string{"QUESTION": "質問", "CHECK": "課題チェック"}[*m.CallType]
 		}
-		_ = cw.Write([]string{m.CreatedAt.In(app.cfg.Loc).Format("2006-01-02 15:04"), m.StudentEmail, m.StudentName, typ, m.Body})
+		_ = cw.Write([]string{m.LessonDate, m.UpdatedAt.In(app.cfg.Loc).Format("2006-01-02 15:04"), m.StudentEmail, m.StudentName, typ, m.Body})
 	}
 	cw.Flush()
 	return cw.Error()
@@ -405,6 +405,11 @@ func (app *App) handleQueue(c echo.Context) error {
 		head := calls
 		if len(head) > 2 {
 			head = head[:2]
+		}
+		// この授業で書いたメモと呼び出し回数を付ける(2回目以降は前のメモを上書きする)
+		t := time.Now()
+		if err := app.store.FillLessonInfo(c.Request().Context(), room.ID, app.cfg.lessonDate(t), app.cfg.dayStart(t), head); err != nil {
+			return err
 		}
 		return c.JSON(http.StatusOK, map[string]any{"counts": cnt, "head": head, "isOpen": room.IsOpen, "serverTime": time.Now().UTC()})
 	}
