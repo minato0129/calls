@@ -11,6 +11,7 @@ export default function TeacherRoom() {
   const nav = useNavigate()
   const now = useNow()
   const [room, setRoom] = useState<Room | null>(null)
+  const [switching, setSwitching] = useState(false)
   const [queue, setQueue] = useState<TeacherQueue | null>(null)
   const [selected, setSelected] = useState<Call | null>(null)
   const [memo, setMemo] = useState('')
@@ -50,10 +51,41 @@ export default function TeacherRoom() {
       } />
       <main className="page stack">
         {room && (
-          <p className="muted">
-            {room.className} ・ {slotLabel(room)}{' '}
-            {queue?.isOpen ? <span className="badge live">授業中</span> : <span className="badge">授業時間外</span>}
-          </p>
+          <section className="card session">
+            <div>
+              <p className="muted small">{room.className} ・ {slotLabel(room)}</p>
+              <p>
+                {queue?.isOpen ? <span className="badge live">授業中</span> : <span className="badge">授業時間外</span>}
+                {queue?.isOpen && room.openUntil && new Date(room.openUntil) > new Date(now) && (
+                  <span className="muted small"> {new Date(room.openUntil).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} まで</span>
+                )}
+              </p>
+            </div>
+            {queue?.isOpen ? (
+              <button
+                className="btn"
+                disabled={switching}
+                onClick={async () => {
+                  if (queue.counts.total > 0 && !confirm(`待っている ${queue.counts.total} 人の呼び出しは取り消されます。授業を終了しますか?`)) return
+                  setSwitching(true)
+                  try { setRoom(await api.closeRoom(id)); await load() } catch (e) { setError((e as Error).message) } finally { setSwitching(false) }
+                }}
+              >
+                授業を終了
+              </button>
+            ) : (
+              <button
+                className="btn primary"
+                disabled={switching}
+                onClick={async () => {
+                  setSwitching(true)
+                  try { setRoom(await api.openRoom(id)); await load() } catch (e) { setError((e as Error).message) } finally { setSwitching(false) }
+                }}
+              >
+                授業を開始
+              </button>
+            )}
+          </section>
         )}
 
         {showQR && (

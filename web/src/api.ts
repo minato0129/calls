@@ -15,6 +15,8 @@ export interface Room {
   period: number
   createdAt: string
   isOpen: boolean
+  openUntil: string | null
+  closedUntil: string | null
 }
 
 export interface Counts { total: number; question: number; check: number }
@@ -67,6 +69,8 @@ export const api = {
   finishCall: (roomId: string, callId: number, memo: string) =>
     request<void>('POST', `/api/rooms/${roomId}/calls/${callId}/done`, { memo }),
   ack: (roomId: string) => request<void>('POST', `/api/rooms/${roomId}/ack`),
+  openRoom: (roomId: string) => request<Room>('POST', `/api/rooms/${roomId}/open`),
+  closeRoom: (roomId: string) => request<Room>('POST', `/api/rooms/${roomId}/close`),
   memos: (roomId: string, date: string) =>
     request<Memo[]>('GET', `/api/rooms/${roomId}/memos?date=${encodeURIComponent(date)}`),
   memoDates: (roomId: string) => request<string[]>('GET', `/api/rooms/${roomId}/memo-dates`),

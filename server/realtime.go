@@ -313,7 +313,7 @@ func (n *Notifier) RunCloser(ctx context.Context) {
 			}
 			for _, id := range ids {
 				room, err := n.app.store.GetRoom(ctx, id)
-				if err != nil || n.app.cfg.isOpen(room.DayOfWeek, room.Period, time.Now()) {
+				if err != nil || n.app.cfg.roomOpen(room, time.Now()) {
 					continue
 				}
 				if err := n.app.store.CancelAllWaiting(ctx, id); err == nil {

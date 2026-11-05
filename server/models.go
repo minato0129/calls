@@ -23,6 +23,10 @@ type Room struct {
 	Period    int       `gorm:"type:tinyint;not null;uniqueIndex:uq_owner_slot,priority:3" json:"period"`
 	CreatedAt time.Time `gorm:"type:datetime(3)" json:"createdAt"`
 
+	// 先生の手動操作。時間割より優先される
+	OpenUntil   *time.Time `gorm:"type:datetime(3)" json:"openUntil"`   // 「授業を開始」で、この時刻まで開く
+	ClosedUntil *time.Time `gorm:"type:datetime(3)" json:"closedUntil"` // 「授業を終了」で、時間割の残りの時間も閉じる
+
 	// ルーム削除で受講登録・呼び出し・メモも消す
 	Enrollments []Enrollment `gorm:"constraint:OnDelete:CASCADE" json:"-"`
 	Calls       []Call       `gorm:"constraint:OnDelete:CASCADE" json:"-"`

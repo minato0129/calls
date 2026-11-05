@@ -122,10 +122,40 @@ func (c *Config) currentSlot(t time.Time) (dow, period int, ok bool) {
 	return int(lt.Weekday()), 0, false
 }
 
-func (c *Config) isOpen(dow, period int, now time.Time) bool {
+// 時間割どおりなら授業中か
+func (c *Config) scheduledOpen(dow, period int, now time.Time) bool {
 	if c.ForceOpen {
 		return true
 	}
 	d, p, ok := c.currentSlot(now)
 	return ok && d == dow && p == period
+}
+
+// 今が時間割上の授業中なら、その時限の終了時刻を返す
+func (c *Config) scheduledEnd(dow, period int, now time.Time) (time.Time, bool) {
+	if !c.scheduledOpen(dow, period, now) {
+		return time.Time{}, false
+	}
+	for _, p := range c.Periods {
+		if p.No == period {
+			lt := now.In(c.Loc)
+			m := hm(p.End)
+			end := time.Date(lt.Year(), lt.Month(), lt.Day(), m/60, m%60, 0, 0, c.Loc)
+			if end.After(now) {
+				return end.UTC(), true
+			}
+		}
+	}
+	return time.Time{}, false
+}
+
+// ルームが今開いているか。先生の手動操作(開始・終了)が時間割より優先される
+func (c *Config) roomOpen(r *Room, now time.Time) bool {
+	if r.ClosedUntil != nil && now.Before(*r.ClosedUntil) {
+		return false
+	}
+	if r.OpenUntil != nil && now.Before(*r.OpenUntil) {
+		return true
+	}
+	return c.scheduledOpen(r.DayOfWeek, r.Period, now)
 }
