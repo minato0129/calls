@@ -9,11 +9,11 @@ export default function StudentHome() {
   const [data, setData] = useState<{ rooms: Room[]; current: Room | null } | null>(null)
   const [error, setError] = useState('')
 
-  // 先生が授業を開始したら自動でルームへ入れるよう、15秒ごとと画面に戻ったときに確認する
+  // 先生が授業を開始したら自動でルームへ入れるよう、5秒ごとと画面に戻ったときに確認する
   useEffect(() => {
     const load = () => api.myRooms().then((d) => { setData(d); setError('') }).catch((e) => setError(e.message))
     void load()
-    const t = window.setInterval(load, 15000)
+    const t = window.setInterval(load, 5000)
     const onVisible = () => { if (document.visibilityState === 'visible') void load() }
     document.addEventListener('visibilitychange', onVisible)
     return () => { window.clearInterval(t); document.removeEventListener('visibilitychange', onVisible) }
