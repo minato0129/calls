@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"gorm.io/driver/mysql"
@@ -33,7 +34,10 @@ func openStore(dsn string) (*Store, error) {
 		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 			NowFunc:        func() time.Time { return time.Now().UTC() },
 			TranslateError: true, // 重複キーを gorm.ErrDuplicatedKey にする
-			Logger:         logger.Default.LogMode(logger.Warn),
+			// 「見つからない」は正常な分岐でも起きるのでログに出さない
+			Logger: logger.New(log.New(os.Stdout, "\n", log.LstdFlags), logger.Config{
+				SlowThreshold: 200 * time.Millisecond, LogLevel: logger.Warn, IgnoreRecordNotFoundError: true,
+			}),
 		})
 		if err == nil {
 			break
@@ -105,10 +109,59 @@ func notFound(err error) error {
 
 // ---------- users ----------
 
+// ユーザーを ID で作成・更新する。
+// 同じメールアドレスの別ユーザー(開発用ログインで作ったものなど)がいたら、
+// その人のルーム・受講登録・呼び出し・メモ・通知の登録をこのユーザーに引き継いでから削除する。
+// (email は一意なので、そのままだと新しいユーザーを作れず、古いユーザーが更新されてしまう)
 func (s *Store) UpsertUser(ctx context.Context, u *User) error {
-	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		DoUpdates: clause.AssignmentColumns([]string{"email", "name", "role"}),
-	}).Create(u).Error
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var old User
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("email = ? AND id <> ?", u.Email, u.ID).First(&old).Error
+		merging := err == nil
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if merging {
+			// メールアドレスを空けてから新しいユーザーを作る
+			if err := tx.Model(&User{}).Where("id = ?", old.ID).Update("email", "merged:"+old.ID).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"email", "name", "role"}),
+		}).Create(u).Error; err != nil {
+			return err
+		}
+		if !merging {
+			return nil
+		}
+		for _, q := range []string{
+			"UPDATE rooms SET owner_id = ? WHERE owner_id = ?",
+			"UPDATE IGNORE enrollments SET user_id = ? WHERE user_id = ?", // 両方で参加済みのルームは新しい方を残す
+			"UPDATE calls SET student_id = ? WHERE student_id = ?",
+			"UPDATE IGNORE memos SET student_id = ? WHERE student_id = ?",
+			"UPDATE push_subscriptions SET user_id = ? WHERE user_id = ?",
+		} {
+			if err := tx.Exec(q, u.ID, old.ID).Error; err != nil {
+				return err
+			}
+		}
+		// 引き継げずに残ったもの(重複分)を消してから古いユーザーを削除する
+		for _, q := range []string{
+			"DELETE FROM enrollments WHERE user_id = ?",
+			"DELETE FROM memos WHERE student_id = ?",
+		} {
+			if err := tx.Exec(q, old.ID).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Delete(&User{}, "id = ?", old.ID).Error; err != nil {
+			return err
+		}
+		log.Printf("ユーザー %s(%s)のデータを %s に引き継ぎました", old.ID, u.Email, u.ID)
+		return nil
+	})
 }
 
 func (s *Store) GetUser(ctx context.Context, id string) (*User, error) {

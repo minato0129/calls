@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -242,8 +243,10 @@ func (app *App) handleCallback(c echo.Context) error {
 	// 名前はログインのたびに Microsoft の表示名で更新する
 	u := &User{ID: claims.Oid, Email: account, Name: name, Role: roleFromEmail(account)}
 	if err := app.store.UpsertUser(ctx, u); err != nil {
-		return err
+		c.Logger().Errorf("save user: %v", err)
+		return loginError(c, "ログイン情報を保存できませんでした。もう一度ログインしてください")
 	}
+	log.Printf("login: %s %s(%s)", u.Role, u.Email, u.Name)
 	a.setSession(c, u.ID)
 	next := "/"
 	if ck, err := c.Cookie(nextCookie); err == nil {
