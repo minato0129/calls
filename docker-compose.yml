@@ -38,10 +38,11 @@ services:
       DATABASE_DSN: callsys:${MYSQL_PASSWORD:-callsys}@tcp(mysql:3306)/callsys
       BASE_URL: ${BASE_URL:-http://localhost:8080}
       SESSION_SECRET: ${SESSION_SECRET:-dev-secret-change-me}
-      AUTH_MODE: ${AUTH_MODE:-dev}
+      AUTH_MODE: ${AUTH_MODE:-microsoft}
       AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
       AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
       AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-admin@example.com}

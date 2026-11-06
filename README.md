@@ -33,8 +33,8 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-http://localhost:8080 を開き、開発用ログインで
-`sensei@example.ac.jp`(先生)と `1234567@example.ac.jp`(学生)を別ブラウザ/シークレットウィンドウで試せます。
+http://localhost:8080 を開き、学校の Microsoft アカウントでログインします(先に下の「Microsoft ログインの設定」が必要)。
+Azure の設定なしで試すときは `.env` を `AUTH_MODE=dev` にすると、`sensei@example.ac.jp`(先生)や `1234567@example.ac.jp`(学生)の開発用ログインが使えます。
 
 - `web/src` を保存 → ブラウザに即反映(ページの再読み込みなし)
 - `server/*.go` を保存 → air が再ビルドして再起動(数秒)
@@ -83,8 +83,9 @@ iPhone の注意点:
 |---|---|---|
 | `BASE_URL` | `http://localhost:8080` | 公開 URL。Microsoft ログインのリダイレクト先、Cookie の Secure 判定に使う |
 | `SESSION_SECRET` | 開発用の固定値 | セッション Cookie の署名鍵。**本番では必ず変更** |
-| `AUTH_MODE` | `dev` | `dev`(開発用ログイン)または `microsoft` |
-| `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` | - | `AUTH_MODE=microsoft` のとき必須 |
+| `AUTH_MODE` | `microsoft` | `microsoft`(学校の Microsoft アカウントのみ)。Azure なしで試すときだけ `dev` |
+| `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` | - | Microsoft ログインに必須(下の「Microsoft ログインの設定」) |
+| `ALLOWED_EMAIL_DOMAINS` | - | ログインを許可するメールのドメイン(カンマ区切り)。空なら制限しない |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | - | 未設定なら通知は送らずログに出すだけ |
 | `VAPID_SUBJECT` | `admin@example.com` | 通知サービスに伝える連絡先。自分か学校のメールアドレスに変更(`mailto:` は付けても付けなくてもよい) |
 | `FORCE_OPEN` | `false` | `true` なら時間割を無視して全ルームを授業中扱い(開発用) |
@@ -92,19 +93,60 @@ iPhone の注意点:
 | `PERIODS` | `1=09:15-10:45,…,6=18:45-20:15` | 時限の時間割(JST)。形式は `時限=開始-終了` をカンマ区切り |
 | `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | `root` / `callsys` | DB のパスワード |
 
-## Microsoft ログインの設定(AUTH_MODE=microsoft)
+## Microsoft ログインの設定
 
-1. Entra ID(Azure ポータル)の「アプリの登録」で新規登録
-   - サポートされるアカウント: この組織ディレクトリのみ
-   - リダイレクト URI(Web): `{BASE_URL}/auth/callback`
-2. 「証明書とシークレット」でクライアントシークレットを作成
-3. テナント ID・クライアント ID・シークレットを `.env` に設定
+ログインは学校の Microsoft アカウントのみです(`AUTH_MODE=microsoft`、既定)。
+名前は Microsoft アカウントの表示名を使い、ログインのたびに最新の表示名で更新します。
 
-学校のテナントでアプリ登録やユーザーの同意が制限されている場合は、情報システム担当に依頼が必要です。
+### 1. Entra ID にアプリを登録する
+
+Azure ポータル(https://portal.azure.com)→「Microsoft Entra ID」→「アプリの登録」→「新規登録」
+
+| 項目 | 設定 |
+|---|---|
+| 名前 | 先生呼び出し(任意) |
+| サポートされているアカウントの種類 | **この組織ディレクトリのみ**(シングルテナント) |
+| リダイレクト URI | プラットフォーム「Web」、`{BASE_URL}/auth/callback` |
+
+リダイレクト URI は使う URL ごとに追加します(「認証」画面から複数登録できます)。
+
+- 手元の PC: `http://localhost:8080/auth/callback`
+- トンネル: `https://xxxx.trycloudflare.com/auth/callback`(Quick Tunnel は起動のたびに URL が変わるので、そのたびに追加が必要)
+- 本番: `https://(学校のサーバー)/auth/callback`
+
+### 2. シークレットを作る
+
+「証明書とシークレット」→「新しいクライアント シークレット」。表示された「値」をすぐに控えます(あとから見られません)。
+
+### 3. `.env` に設定する
+
+| 変数 | どこにあるか |
+|---|---|
+| `AZURE_TENANT_ID` | アプリの「概要」→ ディレクトリ (テナント) ID |
+| `AZURE_CLIENT_ID` | アプリの「概要」→ アプリケーション (クライアント) ID |
+| `AZURE_CLIENT_SECRET` | 手順 2 で控えた値 |
+| `BASE_URL` | ブラウザで開く URL(リダイレクト URI と同じもの) |
+| `ALLOWED_EMAIL_DOMAINS` | 学校のメールのドメイン(例: `school.ac.jp`)。空なら制限しない |
+
+API のアクセス許可は既定の「Microsoft Graph / User.Read」のままで大丈夫です(使うのは `openid` `profile` `email` だけ)。
+学校のテナントで「ユーザーによるアプリへの同意」が制限されている場合は、ログイン時に「管理者の承認が必要」と表示されます。
+その場合は情報システム担当に、アプリの「API のアクセス許可」で「管理者の同意を与えます」を押してもらってください。
+
+### ログインできるアカウント
+
+- 学校のテナントのアカウントだけ(テナント専用の発行元で ID トークンを検証し、`tid` も確認)
+- ゲストアカウント(外部から招待されたアカウント)は不可
+- `ALLOWED_EMAIL_DOMAINS` を設定した場合は、そのドメインのアカウントだけ
+- 学生か先生かは、サインイン名(例: `1234567@school.ac.jp`)の `@` の前が7桁の数字かどうかで判定
+
+### Azure なしで試す(開発用)
+
+`AUTH_MODE=dev` にすると、メールアドレスと名前を入れるだけの開発用ログインになります。本番では使わないでください。
 
 ## 仕様メモ(実装済みの挙動)
 
-- ロール: メールのローカル部が7桁の数字なら学生、それ以外は先生
+- ログイン: 学校の Microsoft アカウントのみ。名前は Microsoft の表示名(ログインのたびに更新)
+- ロール: サインイン名の `@` の前が7桁の数字なら学生、それ以外は先生
 - キュー: 質問・課題チェックを1本の列で、呼んだ順(`calls.id` 昇順)
 - 学生: 同じボタンをもう一度押すと取り消し。待機中はもう一方のボタンは押せない
 - 学生への通知: 先生が先頭の人を「対応済」にしたら、新しく先頭になった人に「次があなたの番です」

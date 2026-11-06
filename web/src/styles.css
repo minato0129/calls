@@ -154,3 +154,7 @@ textarea { resize: vertical; }
 /* 呼び出しの補足(何回目・メモあり) */
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip.plain { background: var(--line); color: var(--muted); }
+
+/* Microsoft ログイン */
+.ms-login { gap: 10px; }
+.login .card.error { text-align: left; }

@@ -7,7 +7,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -48,7 +50,11 @@ func newAuth(ctx context.Context, cfg *Config) (*Auth, error) {
 	if cfg.AuthMode != "microsoft" {
 		return a, nil
 	}
+	// テナント専用の issuer を使うので、学校のテナント以外のアカウントは ID トークンの検証で弾かれる
 	issuer := "https://login.microsoftonline.com/" + cfg.TenantID + "/v2.0"
+	if cfg.OIDCIssuer != "" {
+		issuer = cfg.OIDCIssuer // テスト用
+	}
 	provider, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("OIDC provider: %w", err)
@@ -165,47 +171,82 @@ func (app *App) handleLogin(c echo.Context) error {
 	return c.Redirect(http.StatusFound, a.oauth.AuthCodeURL(state, oauth2.SetAuthURLParam("prompt", "select_account")))
 }
 
+// ログインに失敗したときは、ログイン画面に理由を出す(ブラウザに JSON を見せない)
+func loginError(c echo.Context, msg string) error {
+	return c.Redirect(http.StatusFound, "/login?error="+url.QueryEscape(msg))
+}
+
 // GET /auth/callback(Microsoft からのリダイレクト先)
 func (app *App) handleCallback(c echo.Context) error {
 	a := app.auth
 	if a.oauth == nil {
 		return echo.ErrNotFound
 	}
+	// Microsoft 側でキャンセルされた、同意が必要、など
+	if e := c.QueryParam("error"); e != "" {
+		desc := c.QueryParam("error_description")
+		c.Logger().Warnf("login error from Microsoft: %s %s", e, desc)
+		if e == "access_denied" {
+			return loginError(c, "ログインがキャンセルされました")
+		}
+		if strings.Contains(desc, "AADSTS65001") || strings.Contains(desc, "AADSTS90094") || e == "consent_required" {
+			return loginError(c, "このアプリの利用には学校の管理者の承認が必要です。情報システム担当に連絡してください")
+		}
+		return loginError(c, "Microsoft でのログインに失敗しました("+e+")")
+	}
 	st, err := c.Cookie(stateCookie)
 	if err != nil || st.Value != c.QueryParam("state") {
-		return echo.NewHTTPError(http.StatusBadRequest, "state が一致しません。もう一度ログインしてください")
+		return loginError(c, "ログインの有効期限が切れました。もう一度ログインしてください")
 	}
 	clearCookie(c, stateCookie)
 	ctx := c.Request().Context()
 	tok, err := a.oauth.Exchange(ctx, c.QueryParam("code"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadGateway, "トークン取得に失敗しました")
+		c.Logger().Errorf("token exchange: %v", err)
+		return loginError(c, "Microsoft からの応答を処理できませんでした。もう一度ログインしてください")
 	}
 	raw, _ := tok.Extra("id_token").(string)
 	idt, err := a.verifier.Verify(ctx, raw)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "ID トークンの検証に失敗しました")
+		c.Logger().Errorf("id token verify: %v", err)
+		return loginError(c, "学校の Microsoft アカウントでログインしてください")
 	}
 	var claims struct {
 		Oid               string `json:"oid"`
+		Tid               string `json:"tid"`
 		Email             string `json:"email"`
-		PreferredUsername string `json:"preferred_username"`
-		Name              string `json:"name"`
+		PreferredUsername string `json:"preferred_username"` // サインインに使うアカウント名(UPN)
+		Name              string `json:"name"`               // 表示名(例: 山田 太郎)
 	}
-	if err := idt.Claims(&claims); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "クレームを読み取れません")
+	if err := idt.Claims(&claims); err != nil || claims.Oid == "" {
+		return loginError(c, "アカウント情報を読み取れませんでした")
 	}
-	email := strings.ToLower(claims.Email)
-	if email == "" {
-		email = strings.ToLower(claims.PreferredUsername)
+	if !strings.EqualFold(claims.Tid, app.cfg.TenantID) {
+		return loginError(c, "学校の Microsoft アカウントでログインしてください")
 	}
-	u := &User{ID: claims.Oid, Email: email, Name: claims.Name, Role: roleFromEmail(email)}
-	if u.Name == "" {
-		u.Name = email
+	// 学籍番号の判定にはサインイン名(UPN)を使う。無ければメール
+	account := strings.ToLower(strings.TrimSpace(claims.PreferredUsername))
+	if account == "" {
+		account = strings.ToLower(strings.TrimSpace(claims.Email))
 	}
+	// 学校のテナントに招待された外部アカウント(ゲスト)は UPN に #EXT# が入る
+	if account == "" || strings.Contains(account, "#ext#") {
+		return loginError(c, "学校の Microsoft アカウントでログインしてください(ゲストアカウントは使えません)")
+	}
+	if !app.cfg.emailAllowed(account) {
+		return loginError(c, "このアカウント("+account+")では利用できません。学校のアカウントでログインしてください")
+	}
+	name := strings.TrimSpace(claims.Name)
+	if name == "" {
+		name = account
+	}
+	// 名前はログインのたびに Microsoft の表示名で更新する
+	u := &User{ID: claims.Oid, Email: account, Name: name, Role: roleFromEmail(account)}
 	if err := app.store.UpsertUser(ctx, u); err != nil {
-		return err
+		c.Logger().Errorf("save user: %v", err)
+		return loginError(c, "ログイン情報を保存できませんでした。もう一度ログインしてください")
 	}
+	log.Printf("login: %s %s(%s)", u.Role, u.Email, u.Name)
 	a.setSession(c, u.ID)
 	next := "/"
 	if ck, err := c.Cookie(nextCookie); err == nil {

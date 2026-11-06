@@ -20,8 +20,10 @@ type Config struct {
 	DSN              string
 	BaseURL          string // 例: https://call.example.ac.jp (OIDC のリダイレクト先に使う)
 	SessionSecret    string
-	AuthMode         string // "dev" or "microsoft"
+	AuthMode         string // "microsoft"(既定)または "dev"(開発用ログイン)
 	TenantID         string
+	OIDCIssuer       string   // 通常は空(テナントから自動で決まる)。テスト用に別の OIDC プロバイダーを指すときだけ使う
+	AllowedDomains   []string // ログインを許可するメールのドメイン(例: school.ac.jp)。空なら制限しない
 	ClientID         string
 	ClientSecret     string
 	VapidPublic      string
@@ -50,8 +52,9 @@ func loadConfig() (*Config, error) {
 		DSN:           env("DATABASE_DSN", "callsys:callsys@tcp(127.0.0.1:3306)/callsys"),
 		BaseURL:       strings.TrimRight(env("BASE_URL", "http://localhost:8080"), "/"),
 		SessionSecret: env("SESSION_SECRET", "dev-secret-change-me"),
-		AuthMode:      env("AUTH_MODE", "dev"),
+		AuthMode:      env("AUTH_MODE", "microsoft"),
 		TenantID:      os.Getenv("AZURE_TENANT_ID"),
+		OIDCIssuer:    os.Getenv("OIDC_ISSUER"),
 		ClientID:      os.Getenv("AZURE_CLIENT_ID"),
 		ClientSecret:  os.Getenv("AZURE_CLIENT_SECRET"),
 		VapidPublic:   os.Getenv("VAPID_PUBLIC_KEY"),
@@ -79,10 +82,42 @@ func loadConfig() (*Config, error) {
 		return nil, err
 	}
 	c.Periods = periods
-	if c.AuthMode == "microsoft" && (c.TenantID == "" || c.ClientID == "" || c.ClientSecret == "") {
-		return nil, fmt.Errorf("AUTH_MODE=microsoft には AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET が必要です")
+	for _, d := range strings.Split(os.Getenv("ALLOWED_EMAIL_DOMAINS"), ",") {
+		if d = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(d), "@"))); d != "" {
+			c.AllowedDomains = append(c.AllowedDomains, d)
+		}
+	}
+	switch c.AuthMode {
+	case "microsoft":
+		if c.TenantID == "" || c.ClientID == "" || c.ClientSecret == "" {
+			return nil, fmt.Errorf("Microsoft ログインには AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET が必要です" +
+				"(.env に設定してください。Azure なしで試すときだけ AUTH_MODE=dev)")
+		}
+		if c.TenantID == "common" || c.TenantID == "organizations" || c.TenantID == "consumers" {
+			return nil, fmt.Errorf("AZURE_TENANT_ID には学校のテナント ID を指定してください(%q だと学校以外のアカウントでもログインできてしまいます)", c.TenantID)
+		}
+	case "dev":
+	default:
+		return nil, fmt.Errorf("AUTH_MODE は microsoft か dev を指定してください(%q)", c.AuthMode)
 	}
 	return c, nil
+}
+
+// メールのドメインがログインを許可されているか
+func (c *Config) emailAllowed(email string) bool {
+	if len(c.AllowedDomains) == 0 {
+		return true
+	}
+	_, domain, ok := strings.Cut(email, "@")
+	if !ok {
+		return false
+	}
+	for _, d := range c.AllowedDomains {
+		if domain == d {
+			return true
+		}
+	}
+	return false
 }
 
 // "1=09:15-10:45,2=11:00-12:30"
