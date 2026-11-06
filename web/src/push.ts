@@ -39,6 +39,12 @@ export async function registerSW() {
   await navigator.serviceWorker.register(url, { type: import.meta.env.DEV ? 'module' : 'classic', scope: '/' })
 }
 
+function sameKey(a: ArrayBuffer | null | undefined, b: Uint8Array) {
+  if (!a) return false // 鍵が分からない古いブラウザは作り直す側に倒す
+  const x = new Uint8Array(a)
+  return x.length === b.length && x.every((v, i) => v === b[i])
+}
+
 function urlBase64ToUint8Array(base64: string) {
   const padding = '='.repeat((4 - (base64.length % 4)) % 4)
   const raw = atob((base64 + padding).replace(/-/g, '+').replace(/_/g, '/'))
@@ -57,12 +63,16 @@ export async function enablePush(vapidPublicKey: string): Promise<'ok' | 'denied
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Service Worker を登録できませんでした。ページを再読み込みしてください')), 10000)),
   ])
+  const key = urlBase64ToUint8Array(vapidPublicKey)
   let sub = await reg.pushManager.getSubscription()
+  // サーバーの VAPID 鍵が変わっていたら、古い鍵の登録を消して作り直す
+  // (古い登録のままだと、送信しても Apple / Google に拒否されて届かない)
+  if (sub && !sameKey(sub.options.applicationServerKey, key)) {
+    await sub.unsubscribe().catch(() => undefined)
+    sub = null
+  }
   if (!sub) {
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-    })
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })
   }
   await api.pushSubscribe(sub.toJSON())
   return 'ok'

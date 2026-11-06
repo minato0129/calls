@@ -140,6 +140,16 @@ type PushResult struct {
 	Errors  []string `json:"errors"`
 }
 
+// VAPID 鍵を変えたあと、古い鍵で登録された端末に送ったときの応答
+//
+//	Google: 403 "the VAPID credentials in the authorization header do not correspond to ..."
+//	Apple:  400 {"reason":"VapidPkHashMismatch"}
+func vapidMismatch(status int, body []byte) bool {
+	b := string(body)
+	return (status == http.StatusForbidden && strings.Contains(b, "do not correspond")) ||
+		(status == http.StatusBadRequest && strings.Contains(b, "VapidPkHashMismatch"))
+}
+
 // 登録済みの全端末に送り、結果を返す。結果はすべてログに出す
 func (p *Pusher) SendSync(ctx context.Context, userID string, n Notification) (*PushResult, error) {
 	subs, err := p.store.PushSubs(ctx, userID)
@@ -177,8 +187,10 @@ func (p *Pusher) SendSync(ctx context.Context, userID string, n Notification) (*
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		resp.Body.Close()
 		switch {
-		case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
-			// 端末側で登録が取り消されている(iOS が通知を出さないプッシュを繰り返すと取り消すことがある)
+		case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone || vapidMismatch(resp.StatusCode, body):
+			// 端末側で登録が取り消されている(iOS が通知を出さないプッシュを繰り返すと取り消すことがある)、
+			// または今と違う VAPID 鍵で登録されている。どちらも送れないので消す
+			// (アプリを開いたときに、新しい鍵で登録し直される)
 			res.Removed++
 			_ = p.store.DeletePushSub(ctx, s.Endpoint)
 			log.Printf("push: to=%s kind=%s via=%s status=%d 登録が無効なので削除しました", userID, n.Kind, host, resp.StatusCode)
