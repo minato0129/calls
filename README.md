@@ -47,8 +47,13 @@ Azure の設定なしで試すときは `.env` を `AUTH_MODE=dev` にすると�
 ### Web Push の鍵(初回のみ)
 
 ```bash
+# 開発構成のとき
 docker compose run --rm --no-deps server sh -c "go mod tidy && go run . -genvapid"
+# 本番構成のとき
+docker compose -f docker-compose.yml run --rm --no-deps server -genvapid
 ```
+
+`VAPID_PUBLIC_KEY`(`B` で始まる87文字)と `VAPID_PRIVATE_KEY`(43文字)を、それぞれ1行のまま `.env` に貼ります。
 
 出力された2行を `.env` に貼り、`docker compose up -d` で反映します。
 

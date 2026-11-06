@@ -8,6 +8,8 @@ services:
       WEB_UPSTREAM: web:5173
 
   web:
+    # 本番用のイメージと名前を分ける(同じ名前だと、構成を切り替えたときに取り違える)
+    image: callsys-web-dev
     build:
       target: dev
     environment:
@@ -18,6 +20,7 @@ services:
       - web-node-modules:/app/node_modules # 手元の node_modules と混ざらないよう分ける
 
   server:
+    image: callsys-server-dev
     build:
       target: dev
     volumes:
