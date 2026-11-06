@@ -2,6 +2,18 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// BASE_URL(例: https://calls.example.org)のホスト名と、VITE_ALLOWED_HOSTS(カンマ区切り)を許可に加える
+function allowedHosts(): string[] {
+  const hosts = ['localhost', '.trycloudflare.com']
+  try {
+    if (process.env.BASE_URL) hosts.push(new URL(process.env.BASE_URL).hostname)
+  } catch { /* BASE_URL が URL として読めなければ無視 */ }
+  for (const h of (process.env.VITE_ALLOWED_HOSTS ?? '').split(',')) {
+    if (h.trim()) hosts.push(h.trim())
+  }
+  return hosts
+}
+
 export default defineConfig({
   plugins: [
     react(),
@@ -40,8 +52,8 @@ export default defineConfig({
     host: true,
     port: 5173,
     strictPort: true,
-    // nginx 経由(localhost:8080)やトンネルの URL からのアクセスを許可する
-    allowedHosts: ['localhost', '.trycloudflare.com'],
+    // nginx 経由(localhost:8080)、Quick Tunnel、.env の BASE_URL のドメインからのアクセスを許可する
+    allowedHosts: allowedHosts(),
     // Docker でマウントしたフォルダは変更通知が届かないことがあるのでポーリングする
     watch: process.env.VITE_POLLING === 'true' ? { usePolling: true, interval: 300 } : undefined,
     // Docker を使わず手元で npm run dev するときだけ使われる(Docker では nginx が振り分ける)
