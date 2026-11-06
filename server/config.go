@@ -59,8 +59,8 @@ func loadConfig() (*Config, error) {
 		DevLoginPassword: os.Getenv("DEV_LOGIN_PASSWORD"),
 		ClientID:         os.Getenv("AZURE_CLIENT_ID"),
 		ClientSecret:     os.Getenv("AZURE_CLIENT_SECRET"),
-		VapidPublic:      os.Getenv("VAPID_PUBLIC_KEY"),
-		VapidPrivate:     os.Getenv("VAPID_PRIVATE_KEY"),
+		VapidPublic:      strings.TrimSpace(os.Getenv("VAPID_PUBLIC_KEY")),
+		VapidPrivate:     strings.TrimSpace(os.Getenv("VAPID_PRIVATE_KEY")),
 		// webpush-go が自動で "mailto:" を付けるので、ここでは外しておく(二重になると Apple に拒否される)
 		VapidSubject: strings.TrimPrefix(env("VAPID_SUBJECT", "admin@example.com"), "mailto:"),
 		ForceOpen:    env("FORCE_OPEN", "false") == "true",
@@ -88,6 +88,9 @@ func loadConfig() (*Config, error) {
 		if d = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(d), "@"))); d != "" {
 			c.AllowedDomains = append(c.AllowedDomains, d)
 		}
+	}
+	if err := validateVapidKeys(c.VapidPublic, c.VapidPrivate); err != nil {
+		return nil, err
 	}
 	switch c.AuthMode {
 	case "microsoft":
