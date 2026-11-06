@@ -12,6 +12,7 @@ export default function Login() {
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [error, setError] = useState('')
+  const loginError = params.get('error') ?? '' // Microsoft ログインに失敗したときサーバーから渡される
 
   if (loading) return <div className="center muted">読み込み中…</div>
   if (user) return <Navigate to={next} replace />
@@ -22,10 +23,19 @@ export default function Login() {
       <h1>先生呼び出し</h1>
       <p className="muted">手を挙げ続けなくても、呼んだ順に先生が来ます</p>
 
-      {config?.authMode === 'microsoft' ? (
-        <a className="btn primary wide" href={`/auth/login?next=${encodeURIComponent(next)}`}>
-          Microsoft アカウントでログイン
-        </a>
+      {loginError && <p className="card error" role="alert">{loginError}</p>}
+
+      {config?.authMode !== 'dev' ? (
+        <>
+          <a className="btn primary wide ms-login" href={`/auth/login?next=${encodeURIComponent(next)}`}>
+            <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true">
+              <rect x="1" y="1" width="9" height="9" fill="#f25022" /><rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+              <rect x="1" y="11" width="9" height="9" fill="#00a4ef" /><rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+            </svg>
+            Microsoft アカウントでログイン
+          </a>
+          <p className="hint">学校の Microsoft アカウント(Teams や Office と同じもの)でログインします</p>
+        </>
       ) : (
         <form
           className="card stack"

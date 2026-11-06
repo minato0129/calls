@@ -63,6 +63,8 @@ func main() {
 	}
 	if cfg.AuthMode == "dev" {
 		log.Println("AUTH_MODE=dev: 開発用ログインが有効です。本番では使わないでください")
+	} else {
+		log.Printf("Microsoft ログイン: tenant=%s redirect=%s/auth/callback allowed_domains=%v", cfg.TenantID, cfg.BaseURL, cfg.AllowedDomains)
 	}
 
 	e := echo.New()
