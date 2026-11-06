@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -148,7 +149,31 @@ func (app *App) handleListRooms(c echo.Context) error {
 	for _, r := range rooms {
 		app.withOpen(r)
 	}
+	sortRooms(rooms)
 	return c.JSON(http.StatusOK, rooms)
+}
+
+// 授業中のルームを一番上に、それ以外は月曜1限から順に並べる(日曜は最後)
+func sortRooms(rooms []*Room) {
+	weekday := func(dow int) int {
+		if dow == 0 {
+			return 7 // 日曜は土曜のあと
+		}
+		return dow
+	}
+	sort.SliceStable(rooms, func(i, j int) bool {
+		a, b := rooms[i], rooms[j]
+		if a.IsOpen != b.IsOpen {
+			return a.IsOpen
+		}
+		if weekday(a.DayOfWeek) != weekday(b.DayOfWeek) {
+			return weekday(a.DayOfWeek) < weekday(b.DayOfWeek)
+		}
+		if a.Period != b.Period {
+			return a.Period < b.Period
+		}
+		return a.Subject < b.Subject
+	})
 }
 
 type roomInput struct {
@@ -461,6 +486,7 @@ func (app *App) handleMyRooms(c echo.Context) error {
 			current = r
 		}
 	}
+	sortRooms(rooms)
 	return c.JSON(http.StatusOK, map[string]any{"rooms": rooms, "current": current})
 }
 
