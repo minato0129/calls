@@ -164,6 +164,14 @@ func (s *Store) UpsertUser(ctx context.Context, u *User) error {
 	})
 }
 
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	var u User
+	if err := s.db.WithContext(ctx).First(&u, "email = ?", email).Error; err != nil {
+		return nil, notFound(err)
+	}
+	return &u, nil
+}
+
 func (s *Store) GetUser(ctx context.Context, id string) (*User, error) {
 	var u User
 	if err := s.db.WithContext(ctx).First(&u, "id = ?", id).Error; err != nil {

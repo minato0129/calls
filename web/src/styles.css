@@ -158,3 +158,10 @@ textarea { resize: vertical; }
 /* Microsoft ログイン */
 .ms-login { gap: 10px; }
 .login .card.error { text-align: left; }
+
+/* 開発用ログイン(折りたたみ) */
+.dev-login summary { cursor: pointer; list-style: none; }
+.dev-login summary::-webkit-details-marker { display: none; }
+.dev-login summary::before { content: '▸ '; }
+.dev-login[open] summary::before { content: '▾ '; }
+.dev-login[open] summary { margin-bottom: 12px; }

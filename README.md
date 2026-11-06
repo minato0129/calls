@@ -106,6 +106,7 @@ iPhone の注意点:
 | `AUTH_MODE` | `microsoft` | `microsoft`(学校の Microsoft アカウントのみ)。Azure なしで試すときだけ `dev` |
 | `AZURE_TENANT_ID` / `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` | - | Microsoft ログインに必須(下の「Microsoft ログインの設定」) |
 | `ALLOWED_EMAIL_DOMAINS` | - | ログインを許可するメールのドメイン(カンマ区切り)。空なら制限しない |
+| `DEV_LOGIN_PASSWORD` | - | 設定すると Microsoft ログインと併用で開発用ログインが使える(要パスワード・テスト用) |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | - | 未設定なら通知は送らずログに出すだけ |
 | `VAPID_SUBJECT` | `admin@example.com` | 通知サービスに伝える連絡先。自分か学校のメールアドレスに変更(`mailto:` は付けても付けなくてもよい) |
 | `FORCE_OPEN` | `false` | `true` なら時間割を無視して全ルームを授業中扱い(開発用) |
@@ -159,9 +160,19 @@ API のアクセス許可は既定の「Microsoft Graph / User.Read」のまま�
 - `ALLOWED_EMAIL_DOMAINS` を設定した場合は、そのドメインのアカウントだけ
 - 学生か先生かは、サインイン名(例: `1234567@school.ac.jp`)の `@` の前が7桁の数字かどうかで判定
 
+### 先生のアカウントがないときに試す(開発用ログインの併用)
+
+`.env` に `DEV_LOGIN_PASSWORD` を設定すると、Microsoft ログインはそのままで、ログイン画面に「開発用ログイン(テスト用)」が出ます。
+メールアドレス・表示名・このパスワードを入れるとログインできます(`@` の前が7桁の数字なら学生、それ以外は先生)。
+
+- 例:PC は開発用ログインで `sensei@example.ac.jp`(先生)、スマホは自分の Microsoft アカウント(学生)
+- 公開している URL でも使えるよう、パスワードが必要です。12文字以上にしてください
+- Microsoft で使われているメールアドレスは、開発用ログインでは使えません(本物のアカウントになりすませないように)
+- 本番では `DEV_LOGIN_PASSWORD` を空にしてください
+
 ### Azure なしで試す(開発用)
 
-`AUTH_MODE=dev` にすると、メールアドレスと名前を入れるだけの開発用ログインになります。本番では使わないでください。
+`AUTH_MODE=dev` にすると、Microsoft ログインを使わず、開発用ログインだけになります(`DEV_LOGIN_PASSWORD` が空ならパスワードも不要)。本番では使わないでください。
 
 ## 仕様メモ(実装済みの挙動)
 

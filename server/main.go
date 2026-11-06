@@ -65,6 +65,12 @@ func main() {
 		log.Println("AUTH_MODE=dev: 開発用ログインが有効です。本番では使わないでください")
 	} else {
 		log.Printf("Microsoft ログイン: tenant=%s redirect=%s/auth/callback allowed_domains=%v", cfg.TenantID, cfg.BaseURL, cfg.AllowedDomains)
+		if cfg.DevLoginPassword != "" {
+			log.Println("DEV_LOGIN_PASSWORD が設定されているため、開発用ログインも使えます(テスト用。本番では外してください)")
+			if len(cfg.DevLoginPassword) < 12 {
+				log.Println("注意: DEV_LOGIN_PASSWORD が短すぎます。公開している URL では12文字以上にしてください")
+			}
+		}
 	}
 
 	e := echo.New()
