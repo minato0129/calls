@@ -35,3 +35,21 @@ func TestValidateVapidKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestVapidMismatch(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		body   string
+		want   bool
+	}{
+		{403, "the VAPID credentials in the authorization header do not correspond to the credentials used to create the subscriptions.", true},
+		{400, `{"reason":"VapidPkHashMismatch"}`, true},
+		{403, `{"reason":"BadJwtToken"}`, false}, // 鍵の不一致ではない(設定の問題)ので消さない
+		{400, `{"reason":"BadDeviceToken"}`, false},
+		{201, "", false},
+	} {
+		if got := vapidMismatch(tc.status, []byte(tc.body)); got != tc.want {
+			t.Errorf("vapidMismatch(%d, %q) = %v, want %v", tc.status, tc.body, got, tc.want)
+		}
+	}
+}

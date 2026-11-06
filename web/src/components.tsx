@@ -26,6 +26,7 @@ export function LogoutButton() {
 
 // 許可済みのときに出す「テスト通知」。結果(届いたか、なぜ失敗したか)をその場で表示する
 function PushTest() {
+  const { config } = useApp()
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
   return (
@@ -37,9 +38,14 @@ function PushTest() {
           setBusy(true)
           setResult(null)
           try {
-            const r = await sendTestPush()
+            let r = await sendTestPush()
+            if (r.sent === 0 && r.removed > 0) {
+              // この端末の登録が無効(鍵の変更など)だった。今の鍵で登録し直して、もう一度送る
+              await enablePush(config?.vapidPublicKey ?? '')
+              r = await sendTestPush()
+            }
             if (r.sent > 0) setResult({ ok: true, text: `送信しました(${r.sent}台)。数秒で通知が届けば正常です` })
-            else if (r.removed > 0) setResult({ ok: false, text: '端末の登録が無効になっていました。この画面を開き直して、もう一度試してください' })
+            else if (r.removed > 0) setResult({ ok: false, text: '端末の登録が無効になっていました。アプリを開き直して、もう一度試してください' })
             else if (r.errors.length > 0) setResult({ ok: false, text: `送信に失敗しました: ${r.errors.join(' / ')}` })
             else setResult({ ok: false, text: 'この端末の通知がサーバーに登録されていません。画面を開き直してください' })
           } catch (e) {
