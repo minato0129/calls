@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -256,27 +257,43 @@ func (app *App) handleCallback(c echo.Context) error {
 	return c.Redirect(http.StatusFound, next)
 }
 
-// POST /auth/dev-login(AUTH_MODE=dev のときだけ有効)
+// POST /auth/dev-login
+// AUTH_MODE=dev のとき、または DEV_LOGIN_PASSWORD を設定したとき(Microsoft ログインと併用・要パスワード)だけ有効
 func (app *App) handleDevLogin(c echo.Context) error {
-	if app.cfg.AuthMode != "dev" {
+	if !app.cfg.devLoginEnabled() {
 		return echo.ErrNotFound
 	}
 	var in struct {
-		Email string `json:"email"`
-		Name  string `json:"name"`
+		Email    string `json:"email"`
+		Name     string `json:"name"`
+		Password string `json:"password"`
 	}
 	if err := c.Bind(&in); err != nil || !strings.Contains(in.Email, "@") {
 		return echo.NewHTTPError(http.StatusBadRequest, "メールアドレスを入力してください")
+	}
+	if app.cfg.DevLoginPassword != "" &&
+		subtle.ConstantTimeCompare([]byte(in.Password), []byte(app.cfg.DevLoginPassword)) != 1 {
+		time.Sleep(500 * time.Millisecond) // 総当たりを遅くする
+		return echo.NewHTTPError(http.StatusUnauthorized, "開発用ログインのパスワードが違います")
 	}
 	email := strings.ToLower(strings.TrimSpace(in.Email))
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		name = email
 	}
-	u := &User{ID: "dev:" + email, Email: email, Name: name, Role: roleFromEmail(email)}
-	if err := app.store.UpsertUser(c.Request().Context(), u); err != nil {
+	ctx := c.Request().Context()
+	// Microsoft で登録済みのメールアドレスは使わせない(本物のアカウントを乗っ取れないように。
+	// また、同じメールの開発用ユーザーを作ると、Microsoft のユーザーのデータが引き継がれてしまう)
+	if existing, err := app.store.GetUserByEmail(ctx, email); err == nil && !strings.HasPrefix(existing.ID, "dev:") {
+		return echo.NewHTTPError(http.StatusConflict, "このメールアドレスは Microsoft アカウントで使われています。開発用ログインでは別のメールアドレス(例: sensei@example.ac.jp)を使ってください")
+	} else if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
+	u := &User{ID: "dev:" + email, Email: email, Name: name, Role: roleFromEmail(email)}
+	if err := app.store.UpsertUser(ctx, u); err != nil {
+		return err
+	}
+	log.Printf("dev login: %s %s(%s)", u.Role, u.Email, u.Name)
 	app.auth.setSession(c, u.ID)
 	return c.JSON(http.StatusOK, u)
 }

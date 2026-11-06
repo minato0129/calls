@@ -11,6 +11,7 @@ export default function Login() {
   const nav = useNavigate()
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const loginError = params.get('error') ?? '' // Microsoft ログインに失敗したときサーバーから渡される
 
@@ -25,7 +26,7 @@ export default function Login() {
 
       {loginError && <p className="card error" role="alert">{loginError}</p>}
 
-      {config?.authMode !== 'dev' ? (
+      {config?.authMode !== 'dev' && (
         <>
           <a className="btn primary wide ms-login" href={`/auth/login?next=${encodeURIComponent(next)}`}>
             <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true">
@@ -36,29 +37,39 @@ export default function Login() {
           </a>
           <p className="hint">学校の Microsoft アカウント(Teams や Office と同じもの)でログインします</p>
         </>
-      ) : (
-        <form
-          className="card stack"
-          onSubmit={async (e) => {
-            e.preventDefault()
-            setError('')
-            try {
-              setUser(await api.devLogin(email, name))
-              nav(next, { replace: true })
-            } catch (err) { setError((err as Error).message) }
-          }}
-        >
-          <p className="tag">開発用ログイン</p>
-          <label>メールアドレス
-            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="1234567@example.ac.jp" />
-          </label>
-          <label>表示名
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="山田 太郎" />
-          </label>
-          <p className="hint">ローカル部が7桁の数字なら学生、それ以外は先生としてログインします</p>
-          <button className="btn primary wide">ログイン</button>
-          <ErrorText error={error} />
-        </form>
+      )}
+
+      {config?.devLogin && (
+        // Microsoft ログインと併用しているときは折りたたんでおく
+        <details className="card dev-login" open={config.authMode === 'dev'}>
+          <summary className="tag">開発用ログイン(テスト用)</summary>
+          <form
+            className="stack"
+            onSubmit={async (e) => {
+              e.preventDefault()
+              setError('')
+              try {
+                setUser(await api.devLogin(email, name, password))
+                nav(next, { replace: true })
+              } catch (err) { setError((err as Error).message) }
+            }}
+          >
+            <label>メールアドレス
+              <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="sensei@example.ac.jp" />
+            </label>
+            <label>表示名
+              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="テスト 先生" />
+            </label>
+            {config.devLoginNeedsPassword && (
+              <label>開発用ログインのパスワード
+                <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+              </label>
+            )}
+            <p className="hint">@ の前が7桁の数字なら学生、それ以外は先生としてログインします。Microsoft で使っているメールアドレスは使えません。</p>
+            <button className="btn primary wide">ログイン</button>
+            <ErrorText error={error} />
+          </form>
+        </details>
       )}
     </main>
   )

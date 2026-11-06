@@ -3,7 +3,13 @@ export type CallType = 'QUESTION' | 'CHECK'
 
 export interface User { id: string; email: string; name: string; role: Role }
 export interface Period { no: number; start: string; end: string }
-export interface AppConfig { authMode: 'dev' | 'microsoft'; vapidPublicKey: string; periods: Period[] }
+export interface AppConfig {
+  authMode: 'dev' | 'microsoft'
+  devLogin: boolean              // 開発用ログインを出すか
+  devLoginNeedsPassword: boolean // 開発用ログインにパスワードが要るか
+  vapidPublicKey: string
+  periods: Period[]
+}
 
 export interface Room {
   id: string
@@ -69,7 +75,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 export const api = {
   config: () => request<AppConfig>('GET', '/api/config'),
   me: () => request<User>('GET', '/api/me'),
-  devLogin: (email: string, name: string) => request<User>('POST', '/auth/dev-login', { email, name }),
+  devLogin: (email: string, name: string, password: string) =>
+    request<User>('POST', '/auth/dev-login', { email, name, password }),
   logout: () => request<void>('POST', '/auth/logout'),
 
   // 先生

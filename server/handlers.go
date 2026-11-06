@@ -130,9 +130,11 @@ func (app *App) memberRoom(c echo.Context) (*Room, error) {
 
 func (app *App) handleConfig(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
-		"authMode":       app.cfg.AuthMode,
-		"vapidPublicKey": app.cfg.VapidPublic,
-		"periods":        app.cfg.Periods,
+		"authMode":              app.cfg.AuthMode,
+		"devLogin":              app.cfg.devLoginEnabled(), // 開発用ログインを出すか
+		"devLoginNeedsPassword": app.cfg.DevLoginPassword != "",
+		"vapidPublicKey":        app.cfg.VapidPublic,
+		"periods":               app.cfg.Periods,
 	})
 }
 

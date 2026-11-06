@@ -24,6 +24,7 @@ type Config struct {
 	TenantID         string
 	OIDCIssuer       string   // 通常は空(テナントから自動で決まる)。テスト用に別の OIDC プロバイダーを指すときだけ使う
 	AllowedDomains   []string // ログインを許可するメールのドメイン(例: school.ac.jp)。空なら制限しない
+	DevLoginPassword string   // 設定すると、Microsoft ログインと併用で開発用ログインを使える(要パスワード)
 	ClientID         string
 	ClientSecret     string
 	VapidPublic      string
@@ -48,17 +49,18 @@ func loadConfig() (*Config, error) {
 		return nil, err
 	}
 	c := &Config{
-		Addr:          env("ADDR", ":8080"),
-		DSN:           env("DATABASE_DSN", "callsys:callsys@tcp(127.0.0.1:3306)/callsys"),
-		BaseURL:       strings.TrimRight(env("BASE_URL", "http://localhost:8080"), "/"),
-		SessionSecret: env("SESSION_SECRET", "dev-secret-change-me"),
-		AuthMode:      env("AUTH_MODE", "microsoft"),
-		TenantID:      os.Getenv("AZURE_TENANT_ID"),
-		OIDCIssuer:    os.Getenv("OIDC_ISSUER"),
-		ClientID:      os.Getenv("AZURE_CLIENT_ID"),
-		ClientSecret:  os.Getenv("AZURE_CLIENT_SECRET"),
-		VapidPublic:   os.Getenv("VAPID_PUBLIC_KEY"),
-		VapidPrivate:  os.Getenv("VAPID_PRIVATE_KEY"),
+		Addr:             env("ADDR", ":8080"),
+		DSN:              env("DATABASE_DSN", "callsys:callsys@tcp(127.0.0.1:3306)/callsys"),
+		BaseURL:          strings.TrimRight(env("BASE_URL", "http://localhost:8080"), "/"),
+		SessionSecret:    env("SESSION_SECRET", "dev-secret-change-me"),
+		AuthMode:         env("AUTH_MODE", "microsoft"),
+		TenantID:         os.Getenv("AZURE_TENANT_ID"),
+		OIDCIssuer:       os.Getenv("OIDC_ISSUER"),
+		DevLoginPassword: os.Getenv("DEV_LOGIN_PASSWORD"),
+		ClientID:         os.Getenv("AZURE_CLIENT_ID"),
+		ClientSecret:     os.Getenv("AZURE_CLIENT_SECRET"),
+		VapidPublic:      os.Getenv("VAPID_PUBLIC_KEY"),
+		VapidPrivate:     os.Getenv("VAPID_PRIVATE_KEY"),
 		// webpush-go が自動で "mailto:" を付けるので、ここでは外しておく(二重になると Apple に拒否される)
 		VapidSubject: strings.TrimPrefix(env("VAPID_SUBJECT", "admin@example.com"), "mailto:"),
 		ForceOpen:    env("FORCE_OPEN", "false") == "true",
@@ -101,6 +103,11 @@ func loadConfig() (*Config, error) {
 		return nil, fmt.Errorf("AUTH_MODE は microsoft か dev を指定してください(%q)", c.AuthMode)
 	}
 	return c, nil
+}
+
+// 開発用ログインが使えるか。AUTH_MODE=dev か、DEV_LOGIN_PASSWORD を設定したとき
+func (c *Config) devLoginEnabled() bool {
+	return c.AuthMode == "dev" || c.DevLoginPassword != ""
 }
 
 // メールのドメインがログインを許可されているか
