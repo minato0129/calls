@@ -12,6 +12,7 @@ services:
       target: dev
     environment:
       VITE_POLLING: "true" # マウントしたフォルダの変更をポーリングで検知
+      BASE_URL: ${BASE_URL:-http://localhost:8080} # このドメインからのアクセスを Vite に許可する
     volumes:
       - ./web:/app
       - web-node-modules:/app/node_modules # 手元の node_modules と混ざらないよう分ける
