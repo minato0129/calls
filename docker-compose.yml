@@ -7,7 +7,9 @@
 # docker compose -f docker-compose.yml up -d --build
 #   → 本番構成(Go はバイナリ、React はビルド済みファイルを配信)
 # docker compose --profile tunnel up -d
-#   → スマホ確認用の HTTPS URL を発行(docker compose logs tunnel に表示)
+#   → Cloudflare の名前付きトンネルで固定の URL から公開(.env の CLOUDFLARE_TUNNEL_TOKEN が必要)
+# docker compose --profile quicktunnel up -d
+#   → アカウント不要の一時的な URL を発行(起動のたびに URL が変わる。docker compose logs quicktunnel に表示)
 
 services:
   nginx:
@@ -73,13 +75,25 @@ services:
       retries: 30
     restart: unless-stopped
 
-  # スマホで試すための一時的な HTTPS URL(Cloudflare Quick Tunnel)
+  # 固定の URL で公開する(Cloudflare の名前付きトンネル)
+  # Cloudflare のダッシュボードで、公開ホスト名のサービスを http://nginx:80 にしておく
   tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-} # .env に設定(空だと起動時にエラーになる)
+    depends_on:
+      - nginx
+    restart: unless-stopped
+    profiles: ["tunnel"]
+
+  # アカウント不要の一時的な URL(起動のたびに変わる)
+  quicktunnel:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate --url http://nginx:80
     depends_on:
       - nginx
-    profiles: ["tunnel"]
+    profiles: ["quicktunnel"]
 
 volumes:
   mysql-data:

@@ -62,16 +62,36 @@ override を読み込まないので、Go はバイナリ、React はビルド�
 
 ## スマホで試す(HTTPS)
 
-Web Push とカメラ(QR 読み取り)は HTTPS が必須です。
+Web Push・カメラ(QR 読み取り)・Microsoft ログインには HTTPS が必要です。Cloudflare のトンネルで HTTPS の URL を用意します。
+
+### 名前付きトンネル(URL が固定・おすすめ)
+
+URL が変わらないので、Azure のリダイレクト URI や `.env` を一度設定すれば済みます。Cloudflare のアカウントと、Cloudflare で管理しているドメインが必要です。
+
+1. Cloudflare のダッシュボード →「Zero Trust」→「ネットワーク」→「Tunnels」でトンネルを作成し、コネクタは「Docker」を選ぶ
+2. 表示されたコマンドの `--token` の後ろ(`eyJ...`)を `.env` の `CLOUDFLARE_TUNNEL_TOKEN` に入れる
+   (Windows 用の `cloudflared.exe service install eyJ...` が表示された場合も、`eyJ...` の部分が同じトークン)
+3. トンネルの「公開ホスト名」を追加する
+   - サブドメイン・ドメイン: 例 `call.example.com`
+   - サービス: タイプ `HTTP`、URL `nginx:80`
+4. `.env` の `BASE_URL` を `https://call.example.com` にし、Azure のリダイレクト URI に `https://call.example.com/auth/callback` を追加
+5. 起動
 
 ```bash
 docker compose --profile tunnel up -d
-docker compose logs tunnel | grep trycloudflare
+docker compose logs tunnel   # "Registered tunnel connection" が出れば接続済み
 ```
 
-表示された `https://xxxx.trycloudflare.com` をスマホで開きます。開発構成のままでも使えます(HMR もトンネル越しに動きます)。
-Microsoft ログインを使う場合は、その URL を `.env` の `BASE_URL` と Entra ID のリダイレクト URI に設定してください。
-Quick Tunnel の URL は起動のたびに変わります。
+トークンはパスワードと同じです。Git やチャットに貼らないでください。漏れたときはダッシュボードでトンネルを作り直します。
+
+### Quick Tunnel(アカウント不要・URL は毎回変わる)
+
+```bash
+docker compose --profile quicktunnel up -d
+docker compose logs quicktunnel | grep trycloudflare      # PowerShell: | Select-String trycloudflare
+```
+
+表示された `https://xxxx.trycloudflare.com` をスマホで開きます。コンテナを作り直すたびに URL が変わるので、そのたびに `BASE_URL` と Azure のリダイレクト URI の変更が必要です。
 
 iPhone の注意点:
 - 通知が届くのは **ホーム画面に追加したアプリ**として開いたときだけ(iOS 16.4 以降)
