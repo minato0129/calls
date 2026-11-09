@@ -218,9 +218,10 @@ func (p *Pusher) SendSync(ctx context.Context, userID string, n Notification) (*
 //   - 先生が先頭の人を「対応済」にしたら、新しく先頭になった人に「次があなたの番です」
 
 type roomNotifyState struct {
-	count int
-	ack   bool
-	timer *time.Timer
+	count  int
+	ack    bool
+	timer  *time.Timer
+	headID int64 // 今の先頭の呼び出し。入れ替わったら新しい先頭の学生に知らせる
 }
 
 type Notifier struct {
@@ -263,7 +264,12 @@ func (n *Notifier) QueueChanged(roomID string, reason changeReason) {
 		n.rooms[roomID] = st
 	}
 	prev := st.count
+	prevHead := st.headID
 	st.count = len(calls)
+	st.headID = 0
+	if len(calls) > 0 {
+		st.headID = calls[0].ID
+	}
 	if st.count == 0 {
 		if st.timer != nil {
 			st.timer.Stop()
@@ -278,7 +284,10 @@ func (n *Notifier) QueueChanged(roomID string, reason changeReason) {
 	if prev == 0 && len(calls) > 0 {
 		n.notifyTeacher(room, calls[0])
 	}
-	if reason == reasonDone && len(calls) > 0 {
+	// 先頭が入れ替わったら、新しく先頭になった学生に知らせる。
+	// 前の人が「対応済」になったときだけでなく、前の人が取り消したときも。
+	// 空の列に呼び出して最初から先頭のとき(prevHead == 0)は、自分で押した直後なので知らせない
+	if len(calls) > 0 && prevHead != 0 && calls[0].ID != prevHead && reason != reasonCalled {
 		n.app.push.Send(calls[0].StudentID, Notification{
 			Title: room.Subject,
 			Body:  "次があなたの番です。準備をしてください",
@@ -359,7 +368,7 @@ func (n *Notifier) Restore(ctx context.Context) {
 			continue
 		}
 		// 再起動前に先生が見ていたかは分からないので、確認済み扱いにして再通知はしない
-		n.rooms[id] = &roomNotifyState{count: len(calls), ack: true}
+		n.rooms[id] = &roomNotifyState{count: len(calls), ack: true, headID: calls[0].ID}
 	}
 }
 
