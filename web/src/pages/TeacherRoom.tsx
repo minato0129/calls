@@ -3,21 +3,32 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { api, CALL_LABEL, slotLabel, type Call, type Room, type TeacherQueue } from '../api'
 import { useNow, useRoomEvents } from '../app-context'
-import { elapsed, ErrorText, Header, PushCard } from '../components'
+import { elapsed, ErrorText, Header, IconButton, MenuSheet, PushBanner, Sheet } from '../components'
+import { IconClose, IconEdit, IconMore, IconQR, IconTrash } from '../icons'
 import { RoomForm } from '../RoomForm'
 import { chime, onForegroundPush } from '../push'
+
+// showMemoChip: メモの中身を横に出している所では「メモあり」は出さない
+function CallChips({ c, showMemoChip = true }: { c: Call; showMemoChip?: boolean }) {
+  return (
+    <span className="chips">
+      <span className={`chip ${c.type === 'CHECK' ? 'check' : 'question'}`}>{CALL_LABEL[c.type]}</span>
+      {(c.callsToday ?? 0) > 1 && <span className="chip plain">{c.callsToday}回目</span>}
+      {showMemoChip && c.memo && <span className="chip plain">メモあり</span>}
+    </span>
+  )
+}
 
 export default function TeacherRoom() {
   const { id = '' } = useParams()
   const nav = useNavigate()
   const now = useNow()
   const [room, setRoom] = useState<Room | null>(null)
-  const [switching, setSwitching] = useState(false)
   const [queue, setQueue] = useState<TeacherQueue | null>(null)
   const [selected, setSelected] = useState<Call | null>(null)
   const [memo, setMemo] = useState('')
-  const [showQR, setShowQR] = useState(false)
-  const [editing, setEditing] = useState(false)
+  const [sheet, setSheet] = useState<'none' | 'menu' | 'edit' | 'qr'>('none')
+  const [switching, setSwitching] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -34,9 +45,7 @@ export default function TeacherRoom() {
     } catch (e) { setError((e as Error).message) }
   }, [id, ack])
 
-  useEffect(() => {
-    api.room(id).then(setRoom).catch((e) => setError(e.message))
-  }, [id])
+  useEffect(() => { api.room(id).then(setRoom).catch((e) => setError(e.message)) }, [id])
   useRoomEvents(id, load)
   useEffect(() => {
     document.addEventListener('visibilitychange', ack)
@@ -44,158 +53,153 @@ export default function TeacherRoom() {
   }, [ack])
   useEffect(() => onForegroundPush(() => chime()), [])
 
-  const joinUrl = `${location.origin}/join/${id}`
+  const openCall = (c: Call) => { setSelected(c); setMemo(c.memo ?? '') }
+  const closeSheet = useCallback(() => setSheet('none'), [])
+  const closeCall = useCallback(() => setSelected(null), [])
+
+  const toggleSession = async () => {
+    if (!queue) return
+    if (queue.isOpen && queue.counts.total > 0 &&
+      !confirm(`待っている ${queue.counts.total} 人の呼び出しは取り消されます。授業を終了しますか?`)) return
+    setSwitching(true)
+    try {
+      setRoom(await (queue.isOpen ? api.closeRoom(id) : api.openRoom(id)))
+      await load()
+    } catch (e) { setError((e as Error).message) } finally { setSwitching(false) }
+  }
+
+  const deleteRoom = async () => {
+    if (!confirm('このルームを削除しますか?\nメモもすべて削除されます。必要なら先にメモの画面から CSV を保存してください。')) return
+    await api.deleteRoom(id)
+    nav('/', { replace: true })
+  }
+
+  const [head, next] = queue?.head ?? []
+  const openUntil = queue?.isOpen && room?.openUntil && new Date(room.openUntil).getTime() > now
+    ? new Date(room.openUntil).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : ''
 
   return (
     <>
-      <Header title={room?.subject ?? 'ルーム'} back="/" right={
-        <button className="link-btn" onClick={() => setShowQR(!showQR)}>{showQR ? '閉じる' : 'QR'}</button>
-      } />
+      <Header
+        title={room?.subject ?? 'ルーム'}
+        sub={room ? `${room.className}・${slotLabel(room)}` : undefined}
+        back="/"
+        actions={<>
+          <IconButton label="参加用の QR コード" onClick={() => setSheet('qr')}><IconQR /></IconButton>
+          <IconButton label="その他の操作" onClick={() => setSheet('menu')}><IconMore /></IconButton>
+        </>}
+      />
       <main className="page stack">
-        {room && (
-          <section className="card session">
-            <div>
-              <p className="muted small">
-                {room.className} ・ {slotLabel(room)}{' '}
-                <button className="link-btn inline" onClick={() => setEditing(true)}>変更</button>
-              </p>
-              <p>
-                {queue?.isOpen ? <span className="badge live">授業中</span> : <span className="badge">授業時間外</span>}
-                {queue?.isOpen && room.openUntil && new Date(room.openUntil) > new Date(now) && (
-                  <span className="muted small"> {new Date(room.openUntil).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })} まで</span>
-                )}
-              </p>
-            </div>
-            {queue?.isOpen ? (
-              <button
-                className="btn"
-                disabled={switching}
-                onClick={async () => {
-                  if (queue.counts.total > 0 && !confirm(`待っている ${queue.counts.total} 人の呼び出しは取り消されます。授業を終了しますか?`)) return
-                  setSwitching(true)
-                  try { setRoom(await api.closeRoom(id)); await load() } catch (e) { setError((e as Error).message) } finally { setSwitching(false) }
-                }}
-              >
-                授業を終了
-              </button>
-            ) : (
-              <button
-                className="btn primary"
-                disabled={switching}
-                onClick={async () => {
-                  setSwitching(true)
-                  try { setRoom(await api.openRoom(id)); await load() } catch (e) { setError((e as Error).message) } finally { setSwitching(false) }
-                }}
-              >
-                授業を開始
-              </button>
-            )}
+        {queue && (
+          <section className={`session ${queue.isOpen ? 'on' : ''}`}>
+            <p>
+              {queue.isOpen ? <b>授業中</b> : '授業時間外'}
+              {openUntil && <span>{openUntil} まで</span>}
+            </p>
+            <button type="button" className={`btn small ${queue.isOpen ? '' : 'primary'}`} disabled={switching} onClick={() => void toggleSession()}>
+              {queue.isOpen ? '授業を終了' : '授業を開始'}
+            </button>
           </section>
         )}
 
-        {showQR && (
-          <div className="card qr">
-            <QRCodeSVG value={joinUrl} size={240} marginSize={2} />
-            <p className="muted small">学生はアプリの「QRコードを読み取る」からこのコードを読み取ります</p>
-          </div>
+        <PushBanner text="呼び出されたときに通知を受け取る" />
+
+        {/* いちばん前の人。黒板のようなカードで大きく出す */}
+        {head ? (
+          <section className="board" aria-live="polite">
+            <div className="board-top">
+              <span className="board-no" aria-label="1番目">1</span>
+              <CallChips c={head} showMemoChip={false} />
+              <span className="board-time">{elapsed(head.createdAt, now)}</span>
+            </div>
+            <p className="board-name">{head.studentName}</p>
+            {head.memo && <p className="board-memo">{head.memo}</p>}
+            <button type="button" className="btn board-btn" onClick={() => openCall(head)}>対応する</button>
+          </section>
+        ) : queue && (
+          <section className="board empty-board">
+            <p>{queue.isOpen ? '呼び出しを待っています' : '授業を開始すると、学生が呼び出せるようになります'}</p>
+          </section>
         )}
 
-        <PushCard text="呼び出しがあったときに通知を受け取れるようにします" />
+        {next && (
+          <button type="button" className="next-row" onClick={() => openCall(next)}>
+            <span className="next-label">次</span>
+            <span className="next-name">{next.studentName}</span>
+            <CallChips c={next} />
+            <span className="next-time">{elapsed(next.createdAt, now)}</span>
+          </button>
+        )}
 
-        <section className="counts card">
-          <div className="count-main">
-            <span className="count-num">{queue?.counts.total ?? '-'}</span>
-            <span className="muted">人 待機中</span>
-          </div>
-          <div className="count-sub">
-            <span>質問 <b>{queue?.counts.question ?? 0}</b></span>
-            <span>課題チェック <b>{queue?.counts.check ?? 0}</b></span>
-          </div>
-        </section>
-
-        <section className="stack">
-          {queue && queue.head.length === 0 && <p className="center muted pad">呼び出しはありません</p>}
-          {queue?.head.map((c, i) => (
-            <button key={c.id} className={`card call-row ${i === 0 ? 'first' : ''}`} onClick={() => { setSelected(c); setMemo(c.memo ?? '') }}>
-              <span className="call-no">{i + 1}</span>
-              <span className="call-body">
-                <span className="call-name">{c.studentName}</span>
-                <span className="chips">
-                  <span className={`chip ${c.type === 'CHECK' ? 'check' : 'question'}`}>{CALL_LABEL[c.type]}</span>
-                  {(c.callsToday ?? 0) > 1 && <span className="chip plain">{c.callsToday}回目</span>}
-                  {c.memo && <span className="chip plain">メモあり</span>}
-                </span>
-              </span>
-              <span className="call-time">{elapsed(c.createdAt, now)}</span>
-            </button>
-          ))}
-          {queue && queue.counts.total > queue.head.length && (
-            <p className="muted center small">ほか {queue.counts.total - queue.head.length} 人が待っています</p>
-          )}
-        </section>
-
+        {queue && (
+          <dl className="stats">
+            <div><dt>待っている人</dt><dd>{queue.counts.total}</dd></div>
+            <div><dt>質問</dt><dd>{queue.counts.question}</dd></div>
+            <div><dt>課題チェック</dt><dd>{queue.counts.check}</dd></div>
+          </dl>
+        )}
         <ErrorText error={error} />
-
-        <button
-          className="btn danger-outline wide"
-          onClick={async () => {
-            if (!confirm('このルームを削除しますか?\nメモもすべて削除されます。必要なら先にメモ一覧からCSVを保存してください。')) return
-            await api.deleteRoom(id)
-            nav('/', { replace: true })
-          }}
-        >
-          ルームを削除
-        </button>
       </main>
 
-      {editing && room && (
-        <div className="dialog-backdrop" onClick={() => setEditing(false)}>
-          <div className="dialog stack" role="dialog" aria-modal onClick={(e) => e.stopPropagation()}>
-            <h2>ルームを変更</h2>
-            <p className="hint">メモ・参加している学生・QRコードはそのまま引き継がれます。</p>
-            <RoomForm
-              initial={{ subject: room.subject, className: room.className, dayOfWeek: room.dayOfWeek, period: room.period, periodEnd: room.periodEnd }}
-              submitLabel="保存"
-              onCancel={() => setEditing(false)}
-              onSubmit={async (v) => {
-                setRoom(await api.updateRoom(id, v))
-                setEditing(false)
-                await load()
-              }}
-            />
-          </div>
-        </div>
-      )}
-
       {selected && (
-        <div className="dialog-backdrop" onClick={() => setSelected(null)}>
-          <div className="dialog stack" role="dialog" aria-modal onClick={(e) => e.stopPropagation()}>
-            <h2>{selected.studentName}</h2>
-            <p><span className={`chip ${selected.type === 'CHECK' ? 'check' : 'question'}`}>{CALL_LABEL[selected.type]}</span> ・ {elapsed(selected.createdAt, now)}待ち</p>
-            {(selected.callsToday ?? 0) > 1 && <p className="muted small">この授業で{selected.callsToday}回目の呼び出しです</p>}
-            <label>{selected.memo ? 'この授業のメモ(編集すると上書きされます)' : 'メモ(任意)'}
+        <Sheet title={selected.studentName} onClose={closeCall}>
+          <div className="stack">
+            <p className="sheet-meta"><CallChips c={selected} showMemoChip={false} /><span>{elapsed(selected.createdAt, now)}待ち</span></p>
+            <label>{selected.memo ? 'この授業のメモ(書き換えると上書きされます)' : 'メモ(任意)'}
               <textarea rows={4} value={memo} onChange={(e) => setMemo(e.target.value)}
                 placeholder={selected.type === 'CHECK' ? '例: 課題3 チェック済' : '例: センサーの配線について'} />
             </label>
-            <p className="hint">メモは授業ごとに1人1枚です。{selected.memo ? '空にして対応済にするとメモは削除されます。' : 'この授業でまた呼び出されたときは、このメモが表示されます。'}</p>
-            <div className="row">
-              <button className="btn" onClick={() => setSelected(null)}>キャンセル</button>
-              <button
-                className="btn primary"
-                disabled={busy}
-                onClick={async () => {
-                  setBusy(true)
-                  try {
-                    await api.finishCall(id, selected.id, memo)
-                    setSelected(null)
-                    await load()
-                  } catch (e) { setError((e as Error).message); setSelected(null) } finally { setBusy(false) }
-                }}
-              >
-                対応済
-              </button>
-            </div>
+            <p className="hint">メモは授業ごとに1人1枚です。{selected.memo ? '空にして対応済にするとメモは消えます。' : 'この授業でまた呼び出されたときに表示されます。'}</p>
+            <button
+              type="button"
+              className="btn primary wide large"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  await api.finishCall(id, selected.id, memo)
+                  setSelected(null)
+                  await load()
+                } catch (e) { setError((e as Error).message); setSelected(null) } finally { setBusy(false) }
+              }}
+            >
+              対応済にする
+            </button>
           </div>
+        </Sheet>
+      )}
+
+      {sheet === 'menu' && (
+        <MenuSheet onClose={closeSheet} items={[
+          { label: '参加用の QR コードを表示', icon: <IconQR />, onSelect: () => setSheet('qr') },
+          { label: 'ルームを変更', icon: <IconEdit />, onSelect: () => setSheet('edit') },
+          { label: 'ルームを削除', icon: <IconTrash />, danger: true, onSelect: () => void deleteRoom() },
+        ]} />
+      )}
+
+      {sheet === 'edit' && room && (
+        <Sheet title="ルームを変更" onClose={closeSheet}>
+          <p className="hint">メモ・参加している学生・QR コードはそのまま引き継がれます。</p>
+          <RoomForm
+            initial={{ subject: room.subject, className: room.className, dayOfWeek: room.dayOfWeek, period: room.period, periodEnd: room.periodEnd }}
+            submitLabel="保存"
+            onCancel={closeSheet}
+            onSubmit={async (v) => {
+              setRoom(await api.updateRoom(id, v))
+              closeSheet()
+              await load()
+            }}
+          />
+        </Sheet>
+      )}
+
+      {/* 学生にスマホの画面を見せて読み取ってもらうので、全画面で大きく出す */}
+      {sheet === 'qr' && (
+        <div className="qr-screen" role="dialog" aria-modal aria-label="参加用の QR コード">
+          <button type="button" className="icon-btn qr-close" aria-label="閉じる" onClick={closeSheet}><IconClose /></button>
+          <QRCodeSVG value={`${location.origin}/join/${id}`} size={512} marginSize={2} className="qr-code" />
+          <p className="qr-title">{room?.subject}</p>
+          <p className="qr-sub">アプリの「QR コードを読み取る」から参加</p>
         </div>
       )}
     </>

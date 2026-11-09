@@ -3,54 +3,77 @@ import { Link } from 'react-router-dom'
 import { api, slotLabel, type Room } from '../api'
 import { RoomForm } from '../RoomForm'
 import { useApp } from '../app-context'
-import { ErrorText, Header, LogoutButton, PushCard } from '../components'
+import { ErrorText, Header, IconButton, PushBanner, Sheet, TabBar } from '../components'
+import { IconPlus } from '../icons'
 
 export default function TeacherHome() {
   const { user } = useApp()
-  const [rooms, setRooms] = useState<Room[]>([])
+  const [rooms, setRooms] = useState<Room[] | null>(null)
   const [error, setError] = useState('')
-  const [formKey, setFormKey] = useState(0)
+  const [creating, setCreating] = useState(false)
 
   const load = () => api.rooms().then(setRooms).catch((e) => setError(e.message))
   useEffect(() => { void load() }, [])
 
+  // サーバーが「授業中が先頭、あとは月曜1限から」の順で返す
+  const live = rooms?.filter((r) => r.isOpen) ?? []
+  const rest = rooms?.filter((r) => !r.isOpen) ?? []
+
   return (
     <>
-      <Header title="ルーム" right={<LogoutButton />} />
-      <main className="page stack">
-        <p className="muted">{user?.name} 先生</p>
-        <PushCard text="学生から呼び出されたときに通知を受け取れるようにします" showTest />
+      <Header title="ルーム" sub={user ? `${user.name} 先生` : undefined}
+        actions={<IconButton label="ルームを作成" onClick={() => setCreating(true)}><IconPlus /></IconButton>} />
+      <main className="page stack with-tabbar">
+        <PushBanner text="呼び出されたときに通知を受け取る" />
 
-        <section className="stack">
-          {rooms.length === 0 && <p className="muted">まだルームがありません。下のフォームから作成してください。</p>}
-          {rooms.map((r) => (
-            <Link key={r.id} to={`/rooms/${r.id}`} className="card room-row">
-              <div>
-                <div className="room-title">{r.subject}</div>
-                <div className="muted">{r.className} ・ {slotLabel(r)}</div>
-              </div>
-              {r.isOpen ? <span className="badge live">授業中</span> : <span className="badge">待機</span>}
-            </Link>
-          ))}
-        </section>
+        {live.map((r) => (
+          <Link key={r.id} to={`/rooms/${r.id}`} className="room-live">
+            <span className="room-live-label">授業中</span>
+            <span className="room-live-title">{r.subject}</span>
+            <span className="room-live-sub">{r.className}・{slotLabel(r)}</span>
+          </Link>
+        ))}
 
-        <Link to="/memos" className="btn wide">メモ一覧</Link>
+        {rest.length > 0 && (
+          <ul className="list" aria-label="ルーム">
+            {rest.map((r) => (
+              <li key={r.id}>
+                <Link to={`/rooms/${r.id}`} className="list-row">
+                  <span className="slot">{slotLabel(r)}</span>
+                  <span className="list-main">
+                    <span className="list-title">{r.subject}</span>
+                    <span className="list-sub">{r.className}</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
 
-        <section className="card stack">
-          <h2>ルームを作成</h2>
+        {rooms && rooms.length === 0 && (
+          <div className="empty">
+            <p>授業ごとにルームを作ると、学生が QR コードから参加して呼び出せるようになります。</p>
+            <button type="button" className="btn primary wide" onClick={() => setCreating(true)}>最初のルームを作成</button>
+          </div>
+        )}
+        <ErrorText error={error} />
+      </main>
+      <TabBar />
+
+      {creating && (
+        <Sheet title="ルームを作成" onClose={() => setCreating(false)}>
           <RoomForm
-            key={formKey}
             initial={{ subject: '', className: '', dayOfWeek: 1, period: 1, periodEnd: 1 }}
             submitLabel="作成"
+            onCancel={() => setCreating(false)}
             onSubmit={async (v) => {
               await api.createRoom(v)
-              setFormKey((k) => k + 1) // 入力欄を空に戻す
+              setCreating(false)
               await load()
             }}
           />
-        </section>
-        <ErrorText error={error} />
-      </main>
+        </Sheet>
+      )}
     </>
   )
 }
