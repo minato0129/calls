@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, CALL_LABEL, slotLabel, type CallType, type Room, type StudentQueue } from '../api'
 import { useRoomEvents } from '../app-context'
-import { ErrorText, Header, PushCard } from '../components'
+import { ErrorText, Header, PushBanner } from '../components'
 import { chime, onForegroundPush } from '../push'
 
 export default function StudentRoom() {
@@ -10,10 +10,9 @@ export default function StudentRoom() {
   const [room, setRoom] = useState<Room | null>(null)
   const [queue, setQueue] = useState<StudentQueue | null>(null)
   const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState('')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
-
-  const [loadError, setLoadError] = useState('')
 
   const load = useCallback(async () => {
     try {
@@ -27,75 +26,78 @@ export default function StudentRoom() {
   useEffect(() => onForegroundPush((d) => { chime(); setNotice(d.body) }), [])
   useEffect(() => { if (queue?.position !== 1) setNotice('') }, [queue?.position])
 
-  // 同じボタンをもう一度押したら取り消し
-  const press = async (type: CallType) => {
+  const call = async (type: CallType) => {
     setError('')
     setBusy(true)
-    try {
-      if (queue?.myType === type) await api.cancelCall(id)
-      else await api.call(id, type)
-      await load()
-    } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+    try { await api.call(id, type); await load() } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+  const cancel = async () => {
+    setError('')
+    setBusy(true)
+    try { await api.cancelCall(id); await load() } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
 
-  const waiting = !!queue?.myType
   const open = queue?.isOpen ?? false
+  const waiting = !!queue?.myType
+  const first = waiting && queue!.position === 1
 
   return (
     <>
-      <Header title={room?.subject ?? '授業'} back="/" />
-      <main className="page stack">
-        {room && <p className="muted">{room.className} ・ {slotLabel(room)} ・ {room.ownerName}</p>}
-        <PushCard text="自分の番が近づいたときに通知を受け取れるようにします" />
+      <Header title={room?.subject ?? '授業'} sub={room ? `${room.className}・${slotLabel(room)}・${room.ownerName}` : undefined} back="/" />
+      <main className="page stack with-actionbar tall">
+        <PushBanner text="自分の番が近づいたら通知を受け取る" />
 
-        <section className={`card status ${waiting ? (queue!.position === 1 ? 'next' : 'waiting') : ''}`} aria-live="polite">
+        {/* 整理券。呼び出し中は自分の順番を大きく出す */}
+        <section className={`ticket ${waiting ? 'waiting' : ''} ${first ? 'first' : ''}`} aria-live="polite">
           {loadError ? (
-            // 通信に失敗したときは「授業時間外」と区別して原因を出す
             <>
-              <p><b>状況を取得できませんでした</b></p>
+              <p className="ticket-head">状況を取得できませんでした</p>
               <p className="error">{loadError}</p>
-              <button className="btn" onClick={() => void load()}>再読み込み</button>
+              <button type="button" className="btn small" onClick={() => void load()}>再読み込み</button>
             </>
           ) : !queue ? (
             <p className="muted">読み込み中…</p>
-          ) : !open ? (
-            <>
-              <p>授業時間外です</p>
-              <p className="muted small">先生が授業を開始すると、自動で呼び出せるようになります</p>
-            </>
           ) : waiting ? (
             <>
-              <p className="muted small">{CALL_LABEL[queue!.myType as CallType]}で呼び出し中</p>
-              <p className="position"><b>{queue!.position}</b> 番目</p>
-              {queue!.position === 1
-                ? <p><b>{notice || 'あなたの番です。先生が来るまで待ってください'}</b></p>
-                : <p className="muted">前に {queue!.position - 1} 人います</p>}
+              <p className="ticket-head">{CALL_LABEL[queue.myType as CallType]}で呼び出し中</p>
+              <p className="ticket-no"><b>{queue.position}</b><span>番目</span></p>
+              <p className="ticket-foot">
+                {first ? (notice || '次はあなたの番です。先生が来るまで待ってください') : `前に ${queue.position - 1} 人います`}
+              </p>
+            </>
+          ) : open ? (
+            <>
+              <p className="ticket-head">待っている人</p>
+              <p className="ticket-no idle"><b>{queue.counts.total}</b><span>人</span></p>
+              <p className="ticket-foot">下のボタンで先生を呼び出せます</p>
             </>
           ) : (
             <>
-              <p>待っている人: <b>{queue?.counts.total ?? '-'}</b> 人</p>
-              <p className="muted small">ボタンを押すと先生を呼び出します</p>
+              <p className="ticket-head">授業時間外です</p>
+              <p className="ticket-foot">先生が授業を開始すると、呼び出せるようになります</p>
             </>
           )}
         </section>
-
-        <div className="call-buttons">
-          {(['QUESTION', 'CHECK'] as CallType[]).map((t) => {
-            const active = queue?.myType === t
-            return (
-              <button
-                key={t}
-                className={`big-btn ${t === 'CHECK' ? 'check' : 'question'} ${active ? 'active' : ''}`}
-                disabled={!open || busy || (waiting && !active)}
-                onClick={() => press(t)}
-              >
-                {active ? '取り消す' : CALL_LABEL[t]}
-              </button>
-            )
-          })}
-        </div>
         <ErrorText error={error} />
       </main>
+
+      {/* 親指が届く画面の下に、呼び出しのボタンを置く */}
+      <div className="actionbar">
+        {waiting ? (
+          <button type="button" className="btn wide large danger-outline" disabled={busy} onClick={() => void cancel()}>
+            呼び出しを取り消す
+          </button>
+        ) : (
+          <div className="call-buttons">
+            {(['QUESTION', 'CHECK'] as CallType[]).map((t) => (
+              <button key={t} type="button" className={`call-btn ${t === 'CHECK' ? 'check' : 'question'}`}
+                disabled={!open || busy} onClick={() => void call(t)}>
+                {CALL_LABEL[t]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     </>
   )
 }

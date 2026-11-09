@@ -26,7 +26,7 @@ export function RoomForm({ initial, submitLabel, onSubmit, onCancel }: {
   return (
     <form className="stack" onSubmit={submit}>
       <label>科目名
-        <input required value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="IoT制作" />
+        <input required enterKeyHint="next" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="IoT制作" />
       </label>
       <label>クラス名
         <input required value={form.className} onChange={(e) => setForm({ ...form, className: e.target.value })} placeholder="IE2A" />
@@ -54,8 +54,8 @@ export function RoomForm({ initial, submitLabel, onSubmit, onCancel }: {
       </div>
       <p className="hint">2コマ続きの授業は「開始 1限・終了 2限」のように指定します。間の休み時間も呼び出しの列は続きます。</p>
       <div className="row">
-        {onCancel && <button type="button" className="btn" onClick={onCancel}>キャンセル</button>}
-        <button className="btn primary" disabled={busy}>{submitLabel}</button>
+        {onCancel && <button type="button" className="btn large" onClick={onCancel}>キャンセル</button>}
+        <button className="btn primary large" disabled={busy}>{submitLabel}</button>
       </div>
       <ErrorText error={error} />
     </form>

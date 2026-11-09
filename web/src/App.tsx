@@ -8,12 +8,13 @@ import StudentHome from './pages/StudentHome'
 import StudentRoom from './pages/StudentRoom'
 import Scan from './pages/Scan'
 import Join from './pages/Join'
+import Account from './pages/Account'
 import type { ReactNode } from 'react'
 
 function RequireLogin({ children }: { children: ReactNode }) {
   const { user, loading } = useApp()
   const loc = useLocation()
-  if (loading) return <div className="center muted">読み込み中…</div>
+  if (loading) return <div className="loading" aria-busy>読み込み中…</div>
   if (!user) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname)}`} replace />
   return <>{children}</>
 }
@@ -35,6 +36,7 @@ export default function App() {
       <Route path="/" element={<RequireLogin><Home /></RequireLogin>} />
       <Route path="/rooms/:id" element={<RequireLogin><RoomPage /></RequireLogin>} />
       <Route path="/memos" element={<RequireLogin><Memos /></RequireLogin>} />
+      <Route path="/account" element={<RequireLogin><Account /></RequireLogin>} />
       <Route path="/scan" element={<RequireLogin><Scan /></RequireLogin>} />
       <Route path="/join/:roomId" element={<RequireLogin><Join /></RequireLogin>} />
       <Route path="*" element={<Navigate to="/" replace />} />

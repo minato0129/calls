@@ -20,15 +20,18 @@ export default function Login() {
 
   return (
     <main className="login">
-      <img src="/icon-192.png" alt="" width={72} height={72} className="login-icon" />
-      <h1>先生呼び出し</h1>
-      <p className="muted">手を挙げ続けなくても、呼んだ順に先生が来ます</p>
+      <div className="login-hero">
+        <img src="/icon-192.png" alt="" width={64} height={64} className="login-icon" />
+        <h1>先生呼び出し</h1>
+        <p>手を挙げ続けなくても、呼んだ順に先生が来ます</p>
+      </div>
 
+      <div className="login-actions">
       {loginError && <p className="card error" role="alert">{loginError}</p>}
 
       {config?.authMode !== 'dev' && (
         <>
-          <a className="btn primary wide ms-login" href={`/auth/login?next=${encodeURIComponent(next)}`}>
+          <a className="btn primary wide large ms-login" href={`/auth/login?next=${encodeURIComponent(next)}`}>
             <svg width="18" height="18" viewBox="0 0 21 21" aria-hidden="true">
               <rect x="1" y="1" width="9" height="9" fill="#f25022" /><rect x="11" y="1" width="9" height="9" fill="#7fba00" />
               <rect x="1" y="11" width="9" height="9" fill="#00a4ef" /><rect x="11" y="11" width="9" height="9" fill="#ffb900" />
@@ -66,11 +69,12 @@ export default function Login() {
               </label>
             )}
             <p className="hint">@ の前が7桁の数字なら学生、それ以外は先生としてログインします。Microsoft で使っているメールアドレスは使えません。</p>
-            <button className="btn primary wide">ログイン</button>
+            <button className="btn primary wide large">ログイン</button>
             <ErrorText error={error} />
           </form>
         </details>
       )}
+      </div>
     </main>
   )
 }

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { api, slotLabel, type Room } from '../api'
 import { useApp } from '../app-context'
-import { ErrorText, Header, InstallCard, LogoutButton, PushCard } from '../components'
+import { ErrorText, Header, InstallCard, PushBanner } from '../components'
+import { IconScan, IconUser } from '../icons'
 
 export default function StudentHome() {
   const { user } = useApp()
@@ -24,34 +25,43 @@ export default function StudentHome() {
 
   return (
     <>
-      <Header title="先生呼び出し" right={<LogoutButton />} />
-      <main className="page stack">
-        <p className="muted">{user?.name}</p>
+      <Header title="先生呼び出し" sub={user?.name}
+        actions={<Link to="/account" className="icon-btn" aria-label="アカウント"><IconUser /></Link>} />
+      <main className="page stack with-actionbar">
         <InstallCard />
-        <PushCard text="自分の番が近づいたときに通知を受け取れるようにします" showTest />
+        <PushBanner text="自分の番が近づいたら通知を受け取る" />
 
-        <div className="card stack center">
-          <p>{data && data.rooms.length > 0 ? '今は受講中の授業の時間ではありません。' : 'まだ授業に参加していません。'}</p>
-          <p className="muted small">授業の最初に、先生が表示するQRコードを読み取ってください</p>
-          <Link to="/scan" className="btn primary wide">QRコードを読み取る</Link>
-        </div>
+        {data && data.rooms.length === 0 && (
+          <div className="empty">
+            <p className="empty-title">まだ授業に参加していません</p>
+            <p>授業の最初に、先生が見せる QR コードを下のボタンから読み取ってください。</p>
+          </div>
+        )}
 
         {data && data.rooms.length > 0 && (
-          <section className="stack-sm">
-            <h2>受講中の授業</h2>
-            {data.rooms.map((r) => (
-              <Link key={r.id} to={`/rooms/${r.id}`} className="card room-row">
-                <div>
-                  <div className="room-title">{r.subject}</div>
-                  <div className="muted small">{r.className} ・ {slotLabel(r)} ・ {r.ownerName}</div>
-                </div>
-                <span className="badge">授業時間外</span>
-              </Link>
-            ))}
-          </section>
+          <>
+            <p className="muted">今は受講中の授業の時間ではありません。授業が始まると自動で開きます。</p>
+            <ul className="list" aria-label="受講中の授業">
+              {data.rooms.map((r) => (
+                <li key={r.id}>
+                  <Link to={`/rooms/${r.id}`} className="list-row">
+                    <span className="slot">{slotLabel(r)}</span>
+                    <span className="list-main">
+                      <span className="list-title">{r.subject}</span>
+                      <span className="list-sub">{r.className}・{r.ownerName}</span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
         <ErrorText error={error} />
       </main>
+
+      <div className="actionbar">
+        <Link to="/scan" className="btn primary wide large"><IconScan />QR コードを読み取る</Link>
+      </div>
     </>
   )
 }
