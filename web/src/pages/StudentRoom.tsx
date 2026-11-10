@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { api, CALL_LABEL, slotLabel, type CallType, type Room, type StudentQueue } from '../api'
 import { useRoomEvents } from '../app-context'
 import { ErrorText, Header, PushBanner } from '../components'
+import { IconUser } from '../icons'
 import { chime, onForegroundPush } from '../push'
 
 export default function StudentRoom() {
@@ -43,7 +44,14 @@ export default function StudentRoom() {
 
   return (
     <>
-      <Header title={room?.subject ?? '授業'} sub={room ? `${room.className}・${slotLabel(room)}・${room.ownerName}` : undefined} back="/" />
+      {/* 授業中は戻るボタンを出さない(ホームに戻っても、授業中はこの画面に戻ってくるため)。
+          代わりに右上からプロフィール(アカウント)を開けるようにする */}
+      <Header
+        title={room?.subject ?? '授業'}
+        sub={room ? `${room.className}・${slotLabel(room)}・${room.ownerName}` : undefined}
+        back={queue && !queue.isOpen ? '/' : undefined}
+        actions={<Link to="/account" className="icon-btn" aria-label="プロフィール" title="プロフィール"><IconUser /></Link>}
+      />
       <main className="page stack with-actionbar tall">
         <PushBanner text="自分の番が近づいたら通知を受け取る" />
 
