@@ -38,7 +38,7 @@ export default function Memos() {
           {dates.map((d) => <option key={d} value={d}>{formatDate(d)}</option>)}
         </select>
       </div>
-      <main className="page stack with-tabbar">
+      <main className="page page-wide stack with-tabbar">
         <ErrorText error={error} />
         {memos && memos.length === 0 && (
           <div className="empty"><p>{rooms.length === 0 ? 'ルームを作ると、ここに授業ごとのメモが並びます。' : 'この授業のメモはまだありません。対応済にするときに書いたメモがここに並びます。'}</p></div>

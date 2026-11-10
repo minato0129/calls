@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api } from './api'
 import { useApp } from './app-context'
 import { IconBack, IconMemo, IconRooms, IconUser } from './icons'
@@ -25,18 +25,31 @@ export function IconButton({ label, onClick, children }: { label: string; onClic
   return <button type="button" className="icon-btn" aria-label={label} title={label} onClick={onClick}>{children}</button>
 }
 
-// 先生の画面の下のタブ
-export function TabBar() {
-  const tab = (to: string, label: string, icon: ReactNode) => (
-    <NavLink to={to} end className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}>
+// 先生の画面のメニュー。スマホでは画面の下のタブ、PC では左のサイドバーになる
+// desktopOnly: スマホではタブを出さない画面(ルームの中など)でも、PC ではサイドバーを出す
+export function TabBar({ desktopOnly = false }: { desktopOnly?: boolean }) {
+  const { user } = useApp()
+  const { pathname } = useLocation()
+  // サイドバーの分だけ画面を右にずらす(styles.css の body.has-sidenav)
+  useEffect(() => {
+    document.body.classList.add('has-sidenav')
+    return () => document.body.classList.remove('has-sidenav')
+  }, [])
+  const tab = (to: string, label: string, icon: ReactNode, active: boolean) => (
+    <NavLink to={to} className={`tab ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined}>
       {icon}<span>{label}</span>
     </NavLink>
   )
   return (
-    <nav className="tabbar" aria-label="メニュー">
-      {tab('/', 'ルーム', <IconRooms />)}
-      {tab('/memos', 'メモ', <IconMemo />)}
-      {tab('/account', 'アカウント', <IconUser />)}
+    <nav className={`tabbar ${desktopOnly ? 'desktop-only' : ''}`} aria-label="メニュー">
+      <div className="sidenav-brand" aria-hidden>
+        <img src="/icon-192.png" alt="" width={32} height={32} />
+        <span>先生呼び出し</span>
+      </div>
+      {tab('/', 'ルーム', <IconRooms />, pathname === '/' || pathname.startsWith('/rooms/'))}
+      {tab('/memos', 'メモ', <IconMemo />, pathname === '/memos')}
+      {tab('/account', 'アカウント', <IconUser />, pathname === '/account')}
+      {user && <p className="sidenav-user">{user.name} 先生</p>}
     </nav>
   )
 }

@@ -35,6 +35,7 @@ export default function StudentHome() {
           <div className="empty">
             <p className="empty-title">まだ授業に参加していません</p>
             <p>授業の最初に、先生が見せる QR コードを下のボタンから読み取ってください。</p>
+            <p className="hint desktop-only">PC で使うときは、先生から共有された参加用のリンクを開いても参加できます。</p>
           </div>
         )}
 

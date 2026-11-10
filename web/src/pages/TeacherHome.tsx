@@ -23,16 +23,20 @@ export default function TeacherHome() {
     <>
       <Header title="ルーム" sub={user ? `${user.name} 先生` : undefined}
         actions={<IconButton label="ルームを作成" onClick={() => setCreating(true)}><IconPlus /></IconButton>} />
-      <main className="page stack with-tabbar">
+      <main className="page page-wide stack with-tabbar">
         <PushBanner text="呼び出されたときに通知を受け取る" />
 
-        {live.map((r) => (
-          <Link key={r.id} to={`/rooms/${r.id}`} className="room-live">
-            <span className="room-live-label">授業中</span>
-            <span className="room-live-title">{r.subject}</span>
-            <span className="room-live-sub">{r.className}・{slotLabel(r)}</span>
-          </Link>
-        ))}
+        {live.length > 0 && (
+          <div className="live-grid">
+            {live.map((r) => (
+              <Link key={r.id} to={`/rooms/${r.id}`} className="room-live">
+                <span className="room-live-label">授業中</span>
+                <span className="room-live-title">{r.subject}</span>
+                <span className="room-live-sub">{r.className}・{slotLabel(r)}</span>
+              </Link>
+            ))}
+          </div>
+        )}
 
         {rest.length > 0 && (
           <ul className="list" aria-label="ルーム">

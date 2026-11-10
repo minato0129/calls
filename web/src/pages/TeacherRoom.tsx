@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { api, CALL_LABEL, slotLabel, type Call, type Room, type TeacherQueue } from '../api'
 import { useNow, useRoomEvents } from '../app-context'
-import { elapsed, ErrorText, Header, IconButton, MenuSheet, PushBanner, Sheet } from '../components'
+import { elapsed, ErrorText, Header, IconButton, MenuSheet, PushBanner, Sheet, TabBar } from '../components'
 import { IconClose, IconEdit, IconMore, IconQR, IconTrash } from '../icons'
 import { RoomForm } from '../RoomForm'
 import { chime, onForegroundPush } from '../push'
@@ -74,6 +74,17 @@ export default function TeacherRoom() {
     nav('/', { replace: true })
   }
 
+  const joinUrl = `${location.origin}/join/${id}`
+  const [copied, setCopied] = useState(false)
+  // Teams などに貼れるよう、参加用のリンクをコピーする
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(joinUrl)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch { prompt('参加用のリンク', joinUrl) }
+  }
+
   const [head, next] = queue?.head ?? []
   const openUntil = queue?.isOpen && room?.openUntil && new Date(room.openUntil).getTime() > now
     ? new Date(room.openUntil).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : ''
@@ -89,57 +100,76 @@ export default function TeacherRoom() {
           <IconButton label="その他の操作" onClick={() => setSheet('menu')}><IconMore /></IconButton>
         </>}
       />
-      <main className="page stack">
-        {queue && (
-          <section className={`session ${queue.isOpen ? 'on' : ''}`}>
-            <p>
-              {queue.isOpen ? <b>授業中</b> : '授業時間外'}
-              {openUntil && <span>{openUntil} まで</span>}
-            </p>
-            <button type="button" className={`btn small ${queue.isOpen ? '' : 'primary'}`} disabled={switching} onClick={() => void toggleSession()}>
-              {queue.isOpen ? '授業を終了' : '授業を開始'}
+      {/* スマホは1列(授業の状態 → 先頭の人 → 次 → 人数)。PC は左に呼び出し、右に授業の状態・人数・QR の2列 */}
+      <main className="page stack room-layout">
+        <div className="room-main">
+          {/* いちばん前の人。黒板のようなカードで大きく出す */}
+          {head ? (
+            <section className="board" aria-live="polite">
+              <div className="board-top">
+                <span className="board-no" aria-label="1番目">1</span>
+                <CallChips c={head} showMemoChip={false} />
+                <span className="board-time">{elapsed(head.createdAt, now)}</span>
+              </div>
+              <p className="board-name">{head.studentName}</p>
+              {head.memo && <p className="board-memo">{head.memo}</p>}
+              <button type="button" className="btn board-btn" onClick={() => openCall(head)}>対応する</button>
+            </section>
+          ) : queue && (
+            <section className="board empty-board">
+              <p>{queue.isOpen ? '呼び出しを待っています' : '授業を開始すると、学生が呼び出せるようになります'}</p>
+            </section>
+          )}
+
+          {next && (
+            <button type="button" className="next-row" onClick={() => openCall(next)}>
+              <span className="next-label">次</span>
+              <span className="next-name">{next.studentName}</span>
+              <CallChips c={next} />
+              <span className="next-time">{elapsed(next.createdAt, now)}</span>
             </button>
-          </section>
-        )}
+          )}
+          <ErrorText error={error} />
+        </div>
 
-        <PushBanner text="呼び出されたときに通知を受け取る" />
+        <aside className="room-side">
+          {queue && (
+            <section className={`session ${queue.isOpen ? 'on' : ''}`}>
+              <p>
+                {queue.isOpen ? <b>授業中</b> : '授業時間外'}
+                {openUntil && <span>{openUntil} まで</span>}
+              </p>
+              <button type="button" className={`btn small ${queue.isOpen ? '' : 'primary'}`} disabled={switching} onClick={() => void toggleSession()}>
+                {queue.isOpen ? '授業を終了' : '授業を開始'}
+              </button>
+            </section>
+          )}
 
-        {/* いちばん前の人。黒板のようなカードで大きく出す */}
-        {head ? (
-          <section className="board" aria-live="polite">
-            <div className="board-top">
-              <span className="board-no" aria-label="1番目">1</span>
-              <CallChips c={head} showMemoChip={false} />
-              <span className="board-time">{elapsed(head.createdAt, now)}</span>
+          <PushBanner text="呼び出されたときに通知を受け取る" />
+
+          {queue && (
+            <dl className="stats">
+              <div><dt>待っている人</dt><dd>{queue.counts.total}</dd></div>
+              <div><dt>質問</dt><dd>{queue.counts.question}</dd></div>
+              <div><dt>課題チェック</dt><dd>{queue.counts.check}</dd></div>
+            </dl>
+          )}
+
+          {/* PC だけ: 参加用の QR を横に出しておく。プロジェクターに映すときは「大きく表示」 */}
+          <section className="qr-card desktop-only" aria-label="参加用の QR コード">
+            <QRCodeSVG value={joinUrl} size={168} marginSize={1} className="qr-card-code" />
+            <div className="qr-card-body">
+              <p className="qr-card-title">参加用の QR コード</p>
+              <p className="hint">学生はアプリの「QR コードを読み取る」から参加します</p>
+              <div className="qr-card-actions">
+                <button type="button" className="btn small" onClick={() => setSheet('qr')}>大きく表示</button>
+                <button type="button" className="btn small" onClick={() => void copyLink()}>{copied ? 'コピーしました' : 'リンクをコピー'}</button>
+              </div>
             </div>
-            <p className="board-name">{head.studentName}</p>
-            {head.memo && <p className="board-memo">{head.memo}</p>}
-            <button type="button" className="btn board-btn" onClick={() => openCall(head)}>対応する</button>
           </section>
-        ) : queue && (
-          <section className="board empty-board">
-            <p>{queue.isOpen ? '呼び出しを待っています' : '授業を開始すると、学生が呼び出せるようになります'}</p>
-          </section>
-        )}
-
-        {next && (
-          <button type="button" className="next-row" onClick={() => openCall(next)}>
-            <span className="next-label">次</span>
-            <span className="next-name">{next.studentName}</span>
-            <CallChips c={next} />
-            <span className="next-time">{elapsed(next.createdAt, now)}</span>
-          </button>
-        )}
-
-        {queue && (
-          <dl className="stats">
-            <div><dt>待っている人</dt><dd>{queue.counts.total}</dd></div>
-            <div><dt>質問</dt><dd>{queue.counts.question}</dd></div>
-            <div><dt>課題チェック</dt><dd>{queue.counts.check}</dd></div>
-          </dl>
-        )}
-        <ErrorText error={error} />
+        </aside>
       </main>
+      <TabBar desktopOnly />
 
       {selected && (
         <Sheet title={selected.studentName} onClose={closeCall}>
@@ -197,7 +227,7 @@ export default function TeacherRoom() {
       {sheet === 'qr' && (
         <div className="qr-screen" role="dialog" aria-modal aria-label="参加用の QR コード">
           <button type="button" className="icon-btn qr-close" aria-label="閉じる" onClick={closeSheet}><IconClose /></button>
-          <QRCodeSVG value={`${location.origin}/join/${id}`} size={512} marginSize={2} className="qr-code" />
+          <QRCodeSVG value={joinUrl} size={512} marginSize={2} className="qr-code" />
           <p className="qr-title">{room?.subject}</p>
           <p className="qr-sub">アプリの「QR コードを読み取る」から参加</p>
         </div>
