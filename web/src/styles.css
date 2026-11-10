@@ -83,7 +83,7 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
 }
 .icon-btn:active { background: var(--line); }
 
-/* 先生の画面の下のタブ */
+/* 先生の画面の下のタブ(PC では左のサイドバー。下の「PC」の所) */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
   display: flex; justify-content: space-around;
@@ -98,6 +98,7 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
   font-size: .72rem; font-weight: 600; color: var(--muted); border-radius: var(--radius);
 }
 .tab.active { color: var(--board); }
+.tabbar.desktop-only, .desktop-only, .sidenav-brand, .sidenav-user { display: none; }
 @media (prefers-color-scheme: dark) { .tab.active { color: var(--board-ink); } }
 
 /* 画面の下に固定する主な操作 */
@@ -107,6 +108,7 @@ button { font: inherit; color: inherit; touch-action: manipulation; }
   background: linear-gradient(to top, var(--paper) 70%, transparent);
 }
 .actionbar > * { max-width: 528px; margin: 0 auto; }
+.actionbar > .btn { display: flex; } /* inline-flex のままだと幅の広い画面で中央に来ない */
 
 /* ---------- 部品 ---------- */
 label { display: flex; flex-direction: column; gap: 6px; font-size: .85rem; font-weight: 600; color: var(--muted); }
@@ -228,6 +230,7 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.6; }
 .dev-login[open] summary { margin-bottom: 12px; }
 
 /* ---------- 先生: ルーム一覧 ---------- */
+.live-grid { display: flex; flex-direction: column; gap: 14px; }
 .room-live {
   display: flex; flex-direction: column; gap: 2px; padding: 18px 18px 16px;
   border-radius: var(--radius-lg); background: var(--board); color: var(--board-ink);
@@ -245,6 +248,11 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.6; }
 .session p span { font-size: .85rem; }
 .session.on p b { color: var(--ink); }
 .session.on p b::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--chalk); margin-right: 8px; vertical-align: middle; box-shadow: 0 0 0 3px color-mix(in srgb, var(--chalk) 35%, transparent); }
+
+/* スマホでは2列の枠を外して1列に並べ、授業の状態と通知の案内を先頭に出す(PC は下の「PC」の所で2列) */
+.room-main, .room-side { display: contents; }
+.room-side > .session { order: -2; }
+.room-side > .banner { order: -1; }
 
 /* いちばん前の人を黒板のカードで大きく */
 .board {
@@ -276,6 +284,13 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.6; }
 .stats > div { background: var(--surface); padding: 10px 14px; }
 .stats dt { font-size: .75rem; color: var(--muted); font-weight: 600; }
 .stats dd { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.3; }
+
+/* PC だけ: 横に出しておく参加用の QR */
+.qr-card { flex-direction: column; gap: 12px; align-items: center; text-align: center; padding: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.qr-card-code { flex: none; width: 176px; height: 176px; padding: 6px; background: #fff; border-radius: var(--radius-sm); }
+.qr-card-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.qr-card-title { font-weight: 800; }
+.qr-card-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 4px; }
 
 /* 全画面の QR(学生にスマホを見せて読み取ってもらう) */
 .qr-screen {
@@ -374,3 +389,110 @@ textarea { resize: vertical; min-height: 96px; line-height: 1.6; }
 .scan-bottom p { font-size: .95rem; text-shadow: 0 1px 4px rgb(0 0 0 / .6); }
 .scan-error { background: rgb(179 38 30 / .9); padding: 8px 12px; border-radius: 10px; }
 .scan-flash { background: rgb(255 255 255 / .18); color: #fff; border: 1px solid rgb(255 255 255 / .4); border-radius: 99px; padding: 10px 18px; font-weight: 600; cursor: pointer; }
+
+/* ==========================================================
+   PC(幅 900px 以上)
+   スマホの見た目はそのままに、広い画面では
+   ・先生のメニューを左のサイドバーに
+   ・先生のルームを2列(左に呼び出し、右に授業の状態・人数・QR)
+   ・下から出るシートを画面中央のダイアログに
+   ・画面の下に固定していたボタンを、内容のすぐ下に
+   ========================================================== */
+@media (min-width: 900px) {
+  :root { --sidenav-w: 232px; }
+
+  /* 先生のメニュー → 左のサイドバー */
+  .tabbar, .tabbar.desktop-only {
+    display: flex; flex-direction: column; justify-content: flex-start; gap: 4px;
+    top: 0; right: auto; width: var(--sidenav-w); padding: 16px 12px;
+    background: var(--surface); border-top: 0; border-right: 1px solid var(--line);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+  }
+  .sidenav-brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 18px; font-weight: 900; font-size: 1.05rem; }
+  .sidenav-brand img { border-radius: 9px; }
+  .tab {
+    flex: none; max-width: none; height: 44px; padding: 0 12px;
+    flex-direction: row; justify-content: flex-start; gap: 12px; font-size: .95rem;
+  }
+  .tab svg { width: 20px; height: 20px; }
+  .tab.active { background: var(--board-soft); }
+  .sidenav-user { display: block; margin-top: auto; padding: 12px; font-size: .85rem; color: var(--muted); border-top: 1px solid var(--line); }
+  body.has-sidenav #root { padding-left: var(--sidenav-w); }
+  body.has-sidenav .topbar { padding-left: 24px; }
+  .page.with-tabbar { padding-bottom: 40px; }
+  .desktop-only { display: revert; }
+  .qr-card.desktop-only { display: flex; }
+
+  /* 枠 */
+  .topbar { min-height: 64px; }
+  .topbar-title h1 { font-size: 1.3rem; }
+  .page { padding: 24px 24px 40px; }
+  .page-wide { max-width: 920px; }
+
+  /* 下から出るシート → 画面中央のダイアログ */
+  .sheet-backdrop { align-items: center; padding: 24px; }
+  .sheet {
+    max-width: 520px; max-height: min(86dvh, 760px); border-radius: var(--radius-lg);
+    padding: 24px; box-shadow: 0 24px 64px rgb(0 0 0 / .25); animation: pop .18s cubic-bezier(.2, .8, .2, 1);
+  }
+  .sheet-handle { display: none; }
+  .menu-item { min-height: 48px; }
+
+  /* 画面の下に固定していた操作 → 内容のすぐ下に置く */
+  .page.with-actionbar, .page.with-actionbar.tall { padding-bottom: 16px; }
+  .actionbar { position: static; padding: 0 24px 40px; background: none; }
+  .actionbar > * { max-width: 512px; }
+
+  /* 先生: ルーム一覧。授業中のルームはカードを横に並べる */
+  .live-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+  .room-live { min-height: 128px; justify-content: flex-end; }
+
+  /* 先生: ルーム。左に呼び出し、右に授業の状態・人数・QR */
+  .page.room-layout {
+    max-width: 1120px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start;
+  }
+  .room-main, .room-side { display: flex; flex-direction: column; gap: 14px; }
+  .room-side { position: sticky; top: 88px; }
+  .board { padding: 28px; gap: 14px; min-height: 340px; }
+  .board-name { font-size: clamp(2.4rem, 4vw, 3.4rem); flex: 1; display: flex; align-items: center; }
+  .board-memo { font-size: 1rem; }
+  .btn.board-btn { min-height: 64px; font-size: 1.2rem; }
+  .empty-board { min-height: 340px; font-size: 1.05rem; }
+  .next-row { min-height: 64px; padding: 10px 18px; }
+  .stats { grid-template-columns: 1fr 1fr; }
+  .stats > div:first-child { grid-column: 1 / -1; }
+  .stats dd { font-size: 1.8rem; }
+
+  /* 全画面の QR はプロジェクターに映せるよう大きめに */
+  .qr-code { width: min(70vw, 70dvh); }
+  .qr-title { font-size: 1.6rem; }
+
+  /* メモ: 名前と時刻を左、メモを右に */
+  .filters { top: 64px; grid-template-columns: minmax(0, 420px) 200px; padding: 12px max(24px, calc((100% - 920px) / 2 + 24px)); }
+  .memos .memo { display: grid; grid-template-columns: 180px minmax(0, 1fr); column-gap: 20px; row-gap: 2px; padding: 16px 20px; }
+  .memo-head { grid-row: span 2; flex-direction: column; justify-content: flex-start; gap: 0; }
+  .memo-body, .memo-sub { grid-column: 2; }
+
+  /* 学生: ルーム */
+  .ticket { min-height: 44dvh; }
+  .ticket-foot { max-width: 30em; }
+  .call-btn { min-height: 112px; font-size: 1.35rem; }
+
+  /* ログイン: 左に紹介、右にログインの操作 */
+  .login { max-width: 960px; flex-direction: row; align-items: center; gap: 48px; padding: 32px; }
+  .login-hero { justify-content: center; padding: 0; }
+  .login-hero h1 { font-size: 2.6rem; }
+  .login-actions { flex: none; width: 420px; padding: 0; }
+}
+
+/* マウスで操作するときの手がかり(タッチ端末では出さない) */
+@media (hover: hover) {
+  .icon-btn:hover, .tab:hover { background: color-mix(in srgb, var(--line) 60%, transparent); }
+  .tab.active:hover { background: var(--board-soft); }
+  .list-row:hover, .next-row:hover, .menu-item:hover { background: color-mix(in srgb, var(--paper) 70%, var(--surface)); }
+  .btn:hover:not(:disabled) { filter: brightness(.96); }
+  .btn.primary:hover:not(:disabled), .call-btn:hover:not(:disabled) { filter: brightness(1.08); }
+  .room-live:hover { filter: brightness(1.12); }
+  .room-live, .list-row, .next-row, .btn, .call-btn { transition: background-color .12s ease, filter .12s ease, transform .08s ease; }
+}
+@keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } }
