@@ -116,6 +116,7 @@ iPhone の注意点:
 | `VAPID_SUBJECT` | `admin@example.com` | 通知サービスに伝える連絡先。自分か学校のメールアドレスに変更(`mailto:` は付けても付けなくてもよい) |
 | `FORCE_OPEN` | `false` | `true` なら時間割を無視して全ルームを授業中扱い(開発用) |
 | `RENOTIFY_SECONDS` | `180` | 先生への再通知間隔 |
+| `NOTIFY_DELAY_SECONDS` | `5` | 呼び出されてから先生に通知するまでの待ち時間。呼び出し・取り消しを連打されても、通知は1回だけ |
 | `PERIODS` | `1=09:15-10:45,…,6=18:45-20:15` | 時限の時間割(JST)。形式は `時限=開始-終了` をカンマ区切り |
 | `MYSQL_ROOT_PASSWORD` / `MYSQL_PASSWORD` | `root` / `callsys` | DB のパスワード |
 

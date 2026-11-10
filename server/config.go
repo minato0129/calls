@@ -32,6 +32,7 @@ type Config struct {
 	VapidSubject     string
 	ForceOpen        bool // true なら時間割に関係なく全ルームを開いている扱いにする(開発用)
 	RenotifyInterval time.Duration
+	NotifyDelay      time.Duration // 呼び出されてから先生に通知するまでの待ち時間(連打で通知が何度も来ないように)
 	Periods          []Period
 	Loc              *time.Location
 }
@@ -71,6 +72,11 @@ func loadConfig() (*Config, error) {
 		return nil, fmt.Errorf("RENOTIFY_SECONDS が不正です")
 	}
 	c.RenotifyInterval = time.Duration(sec) * time.Second
+	delay, err := strconv.Atoi(env("NOTIFY_DELAY_SECONDS", "5"))
+	if err != nil || delay < 0 {
+		return nil, fmt.Errorf("NOTIFY_DELAY_SECONDS が不正です")
+	}
+	c.NotifyDelay = time.Duration(delay) * time.Second
 	// UTC 保存・UTC 読み出しを強制する
 	if !strings.Contains(c.DSN, "?") {
 		c.DSN += "?"

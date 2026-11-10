@@ -210,7 +210,9 @@ func (p *Pusher) SendSync(ctx context.Context, userID string, n Notification) (*
 // ================= 通知ロジック =================
 //
 // 先生向け:
-//   - 待機人数が 0→1 になったら通知し、確認済みフラグを false にする
+//   - 待機人数が 0→1 になったら、5 秒後(NOTIFY_DELAY_SECONDS)に通知する。
+//     その間に列が空になったら(取り消し)通知しない。呼び出し・取り消しを連打されても、
+//     列が空になるたびに待ち時間が最初からになるので、通知は最後に呼び出してから5秒後の1回だけ
 //   - 確認済みになるまで 3 分ごと(RENOTIFY_SECONDS)に再通知する
 //   - 先生のアプリが前面に来たら(POST /ack)確認済みにして止める
 //   - 待機人数が 0 になったらリセット
@@ -220,7 +222,8 @@ func (p *Pusher) SendSync(ctx context.Context, userID string, n Notification) (*
 type roomNotifyState struct {
 	count  int
 	ack    bool
-	timer  *time.Timer
+	timer  *time.Timer // 再通知
+	first  *time.Timer // 最初の通知(呼び出されてから待ち時間のあと)
 	headID int64 // 今の先頭の呼び出し。入れ替わったら新しい先頭の学生に知らせる
 }
 
@@ -274,16 +277,16 @@ func (n *Notifier) QueueChanged(roomID string, reason changeReason) {
 		if st.timer != nil {
 			st.timer.Stop()
 		}
+		if st.first != nil {
+			st.first.Stop() // 待ち時間のうちに取り消されたら、先生には通知しない
+		}
 		delete(n.rooms, roomID)
 	} else if prev == 0 {
 		st.ack = false
-		n.scheduleLocked(roomID, st)
+		n.scheduleFirstLocked(roomID, st)
 	}
 	n.mu.Unlock()
 
-	if prev == 0 && len(calls) > 0 {
-		n.notifyTeacher(room, calls[0])
-	}
 	// 先頭が入れ替わったら、新しく先頭になった学生に知らせる。
 	// 前の人が「対応済」になったときだけでなく、前の人が取り消したときも。
 	// 空の列に呼び出して最初から先頭のとき(prevHead == 0)は、自分で押した直後なので知らせない
@@ -295,6 +298,40 @@ func (n *Notifier) QueueChanged(roomID string, reason changeReason) {
 			Kind:  "your-turn",
 		})
 	}
+}
+
+// 待ち時間のあとに最初の通知を送る。その間に列が空になったら(st が消える)送らない。
+// 先生が画面を開いていても最初の通知は送る(開いている画面で音が鳴る)。再通知は確認済みでなければ続ける
+func (n *Notifier) scheduleFirstLocked(roomID string, st *roomNotifyState) {
+	if st.first != nil {
+		st.first.Stop()
+	}
+	st.first = time.AfterFunc(n.app.cfg.NotifyDelay, func() { n.firstNotify(roomID, st) })
+}
+
+func (n *Notifier) firstNotify(roomID string, st *roomNotifyState) {
+	n.mu.Lock()
+	if n.rooms[roomID] != st || st.count == 0 {
+		n.mu.Unlock()
+		return
+	}
+	st.first = nil
+	if !st.ack {
+		n.scheduleLocked(roomID, st) // ここから再通知の間隔を数える
+	}
+	n.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	calls, err := n.app.store.WaitingCalls(ctx, roomID)
+	if err != nil || len(calls) == 0 {
+		return
+	}
+	room, err := n.app.store.GetRoom(ctx, roomID)
+	if err != nil {
+		return
+	}
+	n.notifyTeacher(room, calls[0])
 }
 
 func (n *Notifier) scheduleLocked(roomID string, st *roomNotifyState) {
